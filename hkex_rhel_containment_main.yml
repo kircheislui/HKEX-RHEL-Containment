@@ -3,11 +3,15 @@
   hosts: all
   gather_facts: yes
   vars:
-    # Variables passed from XSOAR frontend via AAP API
+    # Extra variables from XSOAR frontend via AAP API
     action: "{{ action }}"              # 'containment' or 'resume'
     profile: "{{ profile | default('') }}"  # 'FULL', 'PARTIAL', 'REBUILT' (for containment)
     inbound_whitelist: "{{ inbound_whitelist | default([]) }}"
     outbound_whitelist: "{{ outbound_whitelist | default([]) }}"
+    # Default variables
+    backup_path: "/var/backup/hkex"
+    default_inbound_whitelist: []
+    default_outbound_whitelist: []
 
   tasks:
     - name: Validate action variable
@@ -15,26 +19,12 @@
         msg: "Action must be either 'containment' or 'resume'"
       when: action not in ['containment', 'resume']
 
-    - name: Include containment playbook for RHEL 7
-      include_tasks: "hkex_rhel7_containment.yml"
-      when: ansible_distribution_major_version == '7' and action == 'containment'
+    - name: Run containment role
+      include_role:
+        name: containment
+      when: action == 'containment'
 
-    - name: Include containment playbook for RHEL 8
-      include_tasks: "hkex_rhel8_containment.yml"
-      when: ansible_distribution_major_version == '8' and action == 'containment'
-
-    - name: Include containment playbook for RHEL 9
-      include_tasks: "hkex_rhel9_containment.yml"
-      when: ansible_distribution_major_version == '9' and action == 'containment'
-
-    - name: Include resume playbook for RHEL 7
-      include_tasks: "hkex_rhel7_resume.yml"
-      when: ansible_distribution_major_version == '7' and action == 'resume'
-
-    - name: Include resume playbook for RHEL 8
-      include_tasks: "hkex_rhel8_resume.yml"
-      when: ansible_distribution_major_version == '8' and action == 'resume'
-
-    - name: Include resume playbook for RHEL 9
-      include_tasks: "hkex_rhel9_resume.yml"
-      when: ansible_distribution_major_version == '9' and action == 'resume'
+    - name: Run resume role
+      include_role:
+        name: resume
+      when: action == 'resume'

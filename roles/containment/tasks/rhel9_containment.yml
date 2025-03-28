@@ -1,0 +1,57 @@
+---
+- name: HKEX RHEL 9 Containment (nftables)
+  become: yes
+  tasks:
+    - name: Create backup directory
+      file:
+        path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}"
+        state: directory
+        mode: '0700'
+
+    - name: Check if nftables backup exists
+      stat:
+        path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables.conf"
+      register: backup_check
+      failed_when: backup_check.stat.exists
+
+    - name: Backup existing nftables configuration
+      copy:
+        src: "/etc/nftables.conf"
+        dest: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables.conf"
+        remote_src: yes
+
+    - name: Generate nftables configuration
+      template:
+        src: "nftables/{{ profile | lower }}.j2"
+        dest: "/etc/nftables.conf"
+        mode: '0600'
+
+    - name: Apply nftables rules
+      service:
+        name: nftables
+        state: restarted
+      register: nftables_result
+
+    - name: Verify nftables rules
+      shell: nft list ruleset
+      register: nftables_verify
+      changed_when: false
+
+    - name: Fallback on failure
+      block:
+        - name: Restore nftables from backup
+          copy:
+            src: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables.conf"
+            dest: "/etc/nftables.conf"
+            remote_src: yes
+
+        - name: Restart nftables after restore
+          service:
+            name: nftables
+            state: restarted
+
+        - name: Remove backup on failure
+          file:
+            path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}"
+            state: absent
+      when: nftables_result.failed

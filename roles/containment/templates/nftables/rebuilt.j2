@@ -1,0 +1,15 @@
+table inet filter {
+    chain input {
+        type filter hook input priority 0; policy drop;
+        ct state established,related accept
+        {% for rule in (default_inbound_whitelist + inbound_whitelist) %}
+        {{ rule.protocol }} dport {{ rule.port }} ip saddr {{ rule.source }} accept
+        {% endfor %}
+    }
+    chain forward {
+        type filter hook forward priority 0; policy drop;
+    }
+    chain output {
+        type filter hook output priority 0; policy accept;
+    }
+}

@@ -1,0 +1,40 @@
+---
+- name: HKEX RHEL 7 Resume (iptables)
+  become: yes
+  tasks:
+    - name: Find latest backup
+      find:
+        paths: "{{ backup_path }}"
+        patterns: "{{ profile }}-20*"
+        file_type: directory
+      register: backup_files
+
+    - name: Set latest backup path
+      set_fact:
+        latest_backup: "{{ (backup_files.files | sort(attribute='mtime', reverse=True) | first).path }}"
+      when: backup_files.matched > 0
+
+    - name: Copy iptables from latest backup
+      copy:
+        src: "{{ latest_backup }}/iptables"
+        dest: "/etc/sysconfig/iptables"
+        remote_src: yes
+      when: backup_files.matched > 0
+
+    - name: Apply restored iptables rules
+      service:
+        name: iptables
+        state: restarted
+      register: iptables_result
+      when: backup_files.matched > 0
+
+    - name: Verify iptables application
+      shell: iptables -L -n
+      when: backup_files.matched > 0
+      changed_when: false
+
+    - name: Remove backup after successful resume
+      file:
+        path: "{{ latest_backup }}"
+        state: absent
+      when: not iptables_result.failed and backup_files.matched > 0

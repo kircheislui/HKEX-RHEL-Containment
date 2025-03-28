@@ -1,0 +1,9 @@
+*filter
+:INPUT DROP [0:0]
+:FORWARD DROP [0:0]
+:OUTPUT DROP [0:0]
+-A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+{% for rule in (default_inbound_whitelist + inbound_whitelist) %}
+-A INPUT -p {{ rule.protocol }} --dport {{ rule.port }} -s {{ rule.source }} -j ACCEPT
+{% endfor %}
+COMMIT

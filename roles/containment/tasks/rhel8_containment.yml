@@ -1,0 +1,58 @@
+---
+- name: HKEX RHEL 8 Containment (iptables)
+  become: yes
+  tasks:
+    # Same tasks as rhel7_containment.yml
+    - name: Create backup directory
+      file:
+        path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}"
+        state: directory
+        mode: '0700'
+
+    - name: Check if iptables backup exists
+      stat:
+        path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/iptables"
+      register: backup_check
+      failed_when: backup_check.stat.exists
+
+    - name: Backup existing iptables configuration
+      copy:
+        src: "/etc/sysconfig/iptables"
+        dest: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/iptables"
+        remote_src: yes
+
+    - name: Generate iptables configuration
+      template:
+        src: "iptables/{{ profile | lower }}.j2"
+        dest: "/etc/sysconfig/iptables"
+        mode: '0600'
+
+    - name: Apply iptables rules
+      service:
+        name: iptables
+        state: restarted
+      register: iptables_result
+
+    - name: Verify iptables rules
+      shell: iptables -L -n
+      register: iptables_verify
+      changed_when: false
+
+    - name: Fallback on failure
+      block:
+        - name: Restore iptables from backup
+          copy:
+            src: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/iptables"
+            dest: "/etc/sysconfig/iptables"
+            remote_src: yes
+
+        - name: Restart iptables after restore
+          service:
+            name: iptables
+            state: restarted
+
+        - name: Remove backup on failure
+          file:
+            path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}"
+            state: absent
+      when: iptables_result.failed
