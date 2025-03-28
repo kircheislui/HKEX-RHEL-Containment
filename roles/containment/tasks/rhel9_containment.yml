@@ -1,52 +1,55 @@
 ---
 - name: Create backup directory
-  become: yes
   file:
     path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}"
     state: directory
     mode: '0700'
 
 - name: Check if nftables backup exists
-  become: yes
   stat:
     path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables.conf"
   register: backup_check
   failed_when: backup_check.stat.exists
 
-- name: Backup existing nftables configuration
-  become: yes
+- name: Check if nftables config file exists
+  stat:
+    path: "/etc/nftables/main.nft"  # Adjust this path based on your system
+  register: nftables_config_check
+
+- name: Backup existing nftables configuration from file
   copy:
-    src: "/etc/nftables.conf"
+    src: "/etc/nftables/main.nft"  # Adjust this path based on your system
     dest: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables.conf"
     remote_src: yes
+  when: nftables_config_check.stat.exists
+
+- name: Backup current nftables ruleset if no config file exists
+  shell: nft list ruleset > "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables.conf"
+  when: not nftables_config_check.stat.exists
 
 - name: Generate nftables configuration
-  become: yes
   template:
     src: "nftables/{{ profile | lower }}.j2"
-    dest: "/etc/nftables.conf"
+    dest: "/etc/nftables/main.nft"  # Adjust this path based on your system
     mode: '0600'
 
 - name: Apply nftables rules
-  become: yes
   service:
     name: nftables
     state: restarted
   register: nftables_result
 
 - name: Verify nftables rules
-  become: yes
   shell: nft list ruleset
   register: nftables_verify
   changed_when: false
 
 - name: Fallback on failure
-  become: yes
   block:
     - name: Restore nftables from backup
       copy:
         src: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables.conf"
-        dest: "/etc/nftables.conf"
+        dest: "/etc/nftables/main.nft"  # Adjust this path based on your system
         remote_src: yes
 
     - name: Restart nftables after restore
