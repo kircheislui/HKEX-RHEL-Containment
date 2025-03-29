@@ -13,12 +13,12 @@
 
 - name: Check if nftables config file exists
   stat:
-    path: "/etc/nftables/main.nft"  # Adjust this path based on your system
+    path: "/etc/nftables/main.nft"
   register: nftables_config_check
 
 - name: Backup existing nftables configuration from file
   copy:
-    src: "/etc/nftables/main.nft"  # Adjust this path based on your system
+    src: "/etc/nftables/main.nft"
     dest: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables.conf"
     remote_src: yes
   when: nftables_config_check.stat.exists
@@ -30,7 +30,7 @@
 - name: Generate nftables configuration
   template:
     src: "nftables/{{ profile | lower }}.j2"
-    dest: "/etc/nftables/main.nft"  # Adjust this path based on your system
+    dest: "/etc/nftables/main.nft"
     mode: '0600'
 
 - name: Apply nftables rules
@@ -49,7 +49,7 @@
     - name: Restore nftables from backup
       copy:
         src: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables.conf"
-        dest: "/etc/nftables/main.nft"  # Adjust this path based on your system
+        dest: "/etc/nftables/main.nft"
         remote_src: yes
 
     - name: Restart nftables after restore

@@ -2,7 +2,7 @@ table inet filter {
     chain input {
         type filter hook input priority 0; policy drop;
         ct state established,related accept
-        {% for rule in (default_inbound_whitelist + inbound_whitelist) %}
+        {% for rule in (default_inbound_whitelist + (inbound_whitelist | default([]))) %}
         {{ rule.protocol }} dport {{ rule.port }} ip saddr {{ rule.source }} accept
         {% endfor %}
     }

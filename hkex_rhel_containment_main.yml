@@ -6,7 +6,7 @@
     # Extra variables from XSOAR frontend via AAP API
     action: "{{ action }}"              # 'containment' or 'resume'
     profile: "{{ profile | default('') }}"  # 'FULL', 'PARTIAL', 'REBUILT' (for containment)
-    inbound_whitelist: "{{ inbound_whitelist | default([]) }}"
+#    inbound_whitelist: "{{ inbound_whitelist | default([]) }}"
     outbound_whitelist: "{{ outbound_whitelist | default([]) }}"
     # Default variables
     backup_path: "/var/backup/hkex"
