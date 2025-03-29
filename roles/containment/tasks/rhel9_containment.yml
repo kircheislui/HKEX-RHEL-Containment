@@ -7,7 +7,7 @@
 
 - name: Check if nftables backup exists
   stat:
-    path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables.conf"
+    path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/main.nft"  # Changed from nftables.conf
   register: backup_check
   failed_when: backup_check.stat.exists
 
@@ -19,12 +19,12 @@
 - name: Backup existing nftables configuration from file
   copy:
     src: "/etc/nftables/main.nft"
-    dest: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables.conf"
+    dest: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/main.nft"  # Changed from nftables.conf
     remote_src: yes
   when: nftables_config_check.stat.exists
 
 - name: Backup current nftables ruleset if no config file exists
-  shell: nft list ruleset > "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables.conf"
+  shell: nft list ruleset > "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/main.nft"  # Changed from nftables.conf
   when: not nftables_config_check.stat.exists
 
 - name: Generate nftables configuration
@@ -48,7 +48,7 @@
   block:
     - name: Restore nftables from backup
       copy:
-        src: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables.conf"
+        src: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/main.nft"  # Changed from nftables.conf
         dest: "/etc/nftables/main.nft"
         remote_src: yes
 

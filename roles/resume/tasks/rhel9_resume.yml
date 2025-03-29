@@ -1,40 +1,37 @@
 ---
-- name: HKEX RHEL 9 Resume (nftables)
-  become: yes
-  tasks:
-    - name: Find latest backup
-      find:
-        paths: "{{ backup_path }}"
-        patterns: "{{ profile }}-20*"
-        file_type: directory
-      register: backup_files
+- name: Find latest backup
+  find:
+    paths: "{{ backup_path }}"
+    patterns: "{{ profile }}-20*"
+    file_type: directory
+  register: backup_files
 
-    - name: Set latest backup path
-      set_fact:
-        latest_backup: "{{ (backup_files.files | sort(attribute='mtime', reverse=True) | first).path }}"
-      when: backup_files.matched > 0
+- name: Set latest backup path
+  set_fact:
+    latest_backup: "{{ (backup_files.files | sort(attribute='mtime', reverse=True) | first).path }}"
+  when: backup_files.matched > 0
 
-    - name: Copy nftables from latest backup
-      copy:
-        src: "{{ latest_backup }}/nftables.conf"
-        dest: "/etc/nftables.conf"
-        remote_src: yes
-      when: backup_files.matched > 0
+- name: Copy nftables from latest backup
+  copy:
+    src: "{{ latest_backup }}/main.nft"  # Changed from nftables.conf
+    dest: "/etc/nftables/main.nft"
+    remote_src: yes
+  when: backup_files.matched > 0
 
-    - name: Apply restored nftables rules
-      service:
-        name: nftables
-        state: restarted
-      register: nftables_result
-      when: backup_files.matched > 0
+- name: Apply restored nftables rules
+  service:
+    name: nftables
+    state: restarted
+  register: nftables_result
+  when: backup_files.matched > 0
 
-    - name: Verify nftables application
-      shell: nft list ruleset
-      when: backup_files.matched > 0
-      changed_when: false
+- name: Verify nftables application
+  shell: nft list ruleset
+  when: backup_files.matched > 0
+  changed_when: false
 
-    - name: Remove backup after successful resume
-      file:
-        path: "{{ latest_backup }}"
-        state: absent
-      when: not nftables_result.failed and backup_files.matched > 0
+- name: Remove backup after successful resume
+  file:
+    path: "{{ latest_backup }}"
+    state: absent
+  when: not nftables_result.failed and backup_files.matched > 0

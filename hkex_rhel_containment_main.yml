@@ -4,7 +4,7 @@
   gather_facts: yes
   vars:
     # Extra variables from XSOAR frontend via AAP API
-    action: "{{ action }}"              # 'containment' or 'resume'
+    containment_action: "{{ containment_action }}"              # 'containment' or 'resume'
     profile: "{{ profile | default('') }}"  # 'FULL', 'PARTIAL', 'REBUILT' (for containment)
 #    inbound_whitelist: "{{ inbound_whitelist | default([]) }}"
     outbound_whitelist: "{{ outbound_whitelist | default([]) }}"
@@ -17,14 +17,14 @@
     - name: Validate action variable
       fail:
         msg: "Action must be either 'containment' or 'resume'"
-      when: action not in ['containment', 'resume']
+      when: containment_action not in ['containment', 'resume']
 
     - name: Run containment role
       include_role:
         name: containment
-      when: action == 'containment'
+      when: containment_action == 'containment'
 
     - name: Run resume role
       include_role:
         name: resume
-      when: action == 'resume'
+      when: containment_action == 'resume'
