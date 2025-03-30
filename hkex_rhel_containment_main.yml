@@ -1,13 +1,15 @@
 ---
 - name: HKEX RHEL Containment Main Entry Point
-  hosts: all
+  hosts: "{{ hostnames | default([]) }}"  # Updated to use hostname list from extra vars
   gather_facts: yes
   vars:
     # Extra variables from XSOAR frontend via AAP API
-    containment_action: "{{ containment_action }}"              # 'containment' or 'resume'
-    profile: "{{ profile | default('') }}"  # 'FULL', 'PARTIAL', 'REBUILT' (for containment)
-#    inbound_whitelist: "{{ inbound_whitelist | default([]) }}"
+    containment_action: "{{ containment_action }}"  # Renamed from 'action' to avoid reserved name warning
+    profile: "{{ profile | default('') }}"          # 'FULL', 'PARTIAL', 'REBUILT' (for containment)
+    inbound_whitelist: "{{ inbound_whitelist | default([]) }}"
     outbound_whitelist: "{{ outbound_whitelist | default([]) }}"
+    hostnames: "{{ hostnames | default([]) }}"      # List of hostnames from extra vars
+    verification_list: "{{ verification_list | default([]) }}"  # List of IPs to verify outgoing traffic
     # Default variables
     backup_path: "/var/backup/hkex"
     default_inbound_whitelist: []
@@ -19,12 +21,41 @@
         msg: "Action must be either 'containment' or 'resume'"
       when: containment_action not in ['containment', 'resume']
 
-    - name: Run containment role
-      include_role:
-        name: containment
+    - name: Run containment role in parallel
+      block:
+        - name: Include containment role for RHEL 9
+          include_role:
+            name: containment
+            tasks_from: rhel9_containment.yml
+          when: ansible_distribution_major_version == '9'
       when: containment_action == 'containment'
+      async: 3600  # Run in parallel with a timeout of 1 hour
+      poll: 0      # Fire-and-forget; check status later
+      register: containment_result
 
-    - name: Run resume role
-      include_role:
-        name: resume
-      when: containment_action == 'resume'
+    - name: Wait for containment tasks to complete
+      async_status:
+        jid: "{{ containment_result.ansible_job_id }}"
+      register: job_result
+      until: job_result.finished
+      retries: 360  # Wait up to 1 hour (360 * 10s = 3600s)
+      delay: 10
+      when: containment_action == 'containment' and containment_result.ansible_job_id is defined
+
+    - name: Store containment result
+      set_fact:
+        hkex_rhel_containment_result: "{{ job_result }}"
+      when: containment_action == 'containment' and job_result is defined
+
+    - name: Check containment result
+      fail:
+        msg: "Containment failed on one or more hosts"
+      when:
+        - containment_action == 'containment'
+        - job_result is defined
+        - job_result.failed | default(false)
+
+#    - name: Run resume role (not updated here as focus is RHEL 9 containment)
+#      include_role:
+#        name: resume
+#      when: containment_action == 'resume'
