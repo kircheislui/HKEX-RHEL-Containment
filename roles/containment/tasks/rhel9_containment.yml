@@ -79,4 +79,85 @@
         state: absent
   when:
     - nftables_result is defined
+    - nftables_result.failed or (ping_result is defined and ping_result.failed)---
+- name: Create backup directory
+  file:
+    path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}"
+    state: directory
+    mode: '0700'
+
+- name: Check if nftables backup exists
+  stat:
+    path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/main.nft"
+  register: backup_check
+  failed_when: backup_check.stat.exists
+
+- name: Check if nftables config file exists
+  stat:
+    path: "/etc/nftables/main.nft"
+  register: nftables_config_check
+
+- name: Backup existing nftables configuration from file
+  copy:
+    src: "/etc/nftables/main.nft"
+    dest: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/main.nft"
+    remote_src: yes
+  when: nftables_config_check.stat.exists
+
+- name: Backup current nftables ruleset if no config file exists
+  shell: nft list ruleset > "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/main.nft"
+  when: not nftables_config_check.stat.exists
+
+- name: Generate nftables configuration
+  template:
+    src: "nftables/{{ profile | lower }}.j2"
+    dest: "/etc/nftables/main.nft"
+    mode: '0600'
+
+- name: Apply nftables rules
+  service:
+    name: nftables
+    state: restarted
+  register: nftables_result
+
+- name: Verify nftables ruleset
+  shell: nft list ruleset
+  register: nftables_verify
+  changed_when: false
+
+- name: Verify outgoing traffic to verification_list
+  shell: "ping -c 4 {{ item }}"
+  loop: "{{ verification_list }}"
+  register: ping_result
+  failed_when: ping_result.rc != 0
+  when: verification_list | length > 0
+
+- name: Remove backup after successful verification
+  file:
+    path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}"
+    state: absent
+  when:
+    - nftables_result is defined
+    - not nftables_result.failed
+    - ping_result is not defined or not ping_result.failed
+
+- name: Fallback on failure
+  block:
+    - name: Restore nftables from backup
+      copy:
+        src: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/main.nft"
+        dest: "/etc/nftables/main.nft"
+        remote_src: yes
+
+    - name: Restart nftables after restore
+      service:
+        name: nftables
+        state: restarted
+
+    - name: Remove backup on failure
+      file:
+        path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}"
+        state: absent
+  when:
+    - nftables_result is defined
     - nftables_result.failed or (ping_result is defined and ping_result.failed)

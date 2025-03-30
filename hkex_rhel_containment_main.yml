@@ -1,6 +1,6 @@
 ---
 - name: HKEX RHEL Containment Main Entry Point
-  hosts: "{{ hostnames | default([]) }}"  # Updated to use hostname list from extra vars
+  hosts: all  # Use 'all' since limit will filter hosts
   gather_facts: yes
   vars:
     # Extra variables from XSOAR frontend via AAP API
@@ -15,45 +15,20 @@
     default_inbound_whitelist: []
     default_outbound_whitelist: []
 
-  tasks:
+  pre_tasks:
     - name: Validate action variable
       fail:
         msg: "Action must be either 'containment' or 'resume'"
       when: containment_action not in ['containment', 'resume']
 
-    - name: Run containment role in parallel
-      block:
-        - name: Include containment role for RHEL 9
-          include_role:
-            name: containment
-            tasks_from: rhel9_containment.yml
-          when: ansible_distribution_major_version == '9'
-      when: containment_action == 'containment'
-      async: 3600  # Run in parallel with a timeout of 1 hour
-      poll: 0      # Fire-and-forget; check status later
-      register: containment_result
-
-    - name: Wait for containment tasks to complete
-      async_status:
-        jid: "{{ containment_result.ansible_job_id }}"
-      register: job_result
-      until: job_result.finished
-      retries: 360  # Wait up to 1 hour (360 * 10s = 3600s)
-      delay: 10
-      when: containment_action == 'containment' and containment_result.ansible_job_id is defined
-
-    - name: Store containment result
-      set_fact:
-        hkex_rhel_containment_result: "{{ job_result }}"
-      when: containment_action == 'containment' and job_result is defined
-
-    - name: Check containment result
-      fail:
-        msg: "Containment failed on one or more hosts"
+  tasks:
+    - name: Run containment role for RHEL 9
+      include_role:
+        name: containment
+        tasks_from: rhel9_containment.yml
       when:
         - containment_action == 'containment'
-        - job_result is defined
-        - job_result.failed | default(false)
+        - ansible_distribution_major_version == '9'
 
 #    - name: Run resume role (not updated here as focus is RHEL 9 containment)
 #      include_role:
