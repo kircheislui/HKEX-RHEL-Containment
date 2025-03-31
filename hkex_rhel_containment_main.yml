@@ -6,7 +6,7 @@
     # Extra variables from XSOAR frontend via AAP API
     containment_action: "{{ containment_action }}"  # Renamed from 'action' to avoid reserved name warning
     profile: "{{ profile | default('') }}"          # 'FULL', 'PARTIAL', 'REBUILT' (for containment)
-    inbound_whitelist: "{{ inbound_whitelist | default([]) }}"
+    #inbound_whitelist: "{{ inbound_whitelist | default([]) }}"
     outbound_whitelist: "{{ outbound_whitelist | default([]) }}"
     hostnames: "{{ hostnames | default([]) }}"      # List of hostnames from extra vars
     verification_list: "{{ verification_list | default([]) }}"  # List of IPs to verify outgoing traffic
