@@ -1,7 +1,7 @@
 ---
 - name: Create backup directory
   file:
-    path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}"
+    path: "{{ backup_path }}/{{ profile }}"
     state: directory
     mode: '0700'
 
