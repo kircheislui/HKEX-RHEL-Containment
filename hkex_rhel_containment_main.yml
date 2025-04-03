@@ -1,19 +1,29 @@
 ---
 - name: HKEX RHEL Containment Main Entry Point
-  hosts: all  # Use 'all' since limit will filter hosts
+  hosts: all
   gather_facts: yes
   vars:
-    # Extra variables from XSOAR frontend via AAP API
-    containment_action: "{{ containment_action }}"  # Renamed from 'action' to avoid reserved name warning
-    profile: "{{ profile | default('') }}"          # 'FULL', 'PARTIAL', 'REBUILT' (for containment)
-    #inbound_whitelist: "{{ inbound_whitelist | default([]) }}"
+    aap_ip: "192.168.122.11"
+    dns_ip: "192.168.122.12"
+    # Extra variables from API
+    containment_action: "{{ containment_action }}"
+    profile: "{{ profile | default('') }}"
     outbound_whitelist: "{{ outbound_whitelist | default([]) }}"
-    hostnames: "{{ hostnames | default([]) }}"      # List of hostnames from extra vars
-    verification_list: "{{ verification_list | default([]) }}"  # List of IPs to verify outgoing traffic
+    hostnames: "{{ hostnames | default([]) }}"
+    verification_list: "{{ verification_list | default([]) }}"
     # Default variables
-    backup_path: "/var/backup/hkex"
-    default_inbound_whitelist: []
-    default_outbound_whitelist: []
+    backup_path: "/root/"
+    default_inbound_whitelist:
+      - ip: "{{ aap_ip }}"
+        port: 22
+        protocol: "tcp"
+    default_outbound_whitelist:
+      - ip: "{{ dns_ip }}"
+        port: 53
+        protocol: "tcp"
+      - ip: "{{ dns_ip }}"
+        port: 53
+        protocol: "udp"
 
   pre_tasks:
     - name: Validate action variable
@@ -29,8 +39,3 @@
       when:
         - containment_action == 'containment'
         - ansible_distribution_major_version == '9'
-
-#    - name: Run resume role (not updated here as focus is RHEL 9 containment)
-#      include_role:
-#        name: resume
-#      when: containment_action == 'resume'
