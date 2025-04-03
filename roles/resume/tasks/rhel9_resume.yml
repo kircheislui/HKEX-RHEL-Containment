@@ -2,7 +2,7 @@
 - name: Find latest backup
   find:
     paths: "{{ backup_path }}"
-    patterns: "{{ profile }}-20*"
+    patterns: "{{ profile }}"
     file_type: directory
   register: backup_files
 
@@ -13,7 +13,7 @@
 
 - name: Copy nftables from latest backup
   copy:
-    src: "{{ latest_backup }}/main.nft"  # Changed from nftables.conf
+    src: "{{ latest_backup }}/main.nft"
     dest: "/etc/nftables/main.nft"
     remote_src: yes
   when: backup_files.matched > 0
