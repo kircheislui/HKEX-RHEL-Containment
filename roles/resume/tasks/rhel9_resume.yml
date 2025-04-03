@@ -2,7 +2,7 @@
 - name: Find latest backup
   find:
     paths: "{{ backup_path }}"
-    patterns: "{{ profile }}"
+    patterns: "{{ profile }}-{{ ansible_date_time.date }}"
     file_type: directory
   register: backup_files
 
