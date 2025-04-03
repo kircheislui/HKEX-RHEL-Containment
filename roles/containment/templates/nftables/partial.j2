@@ -1,19 +1,23 @@
-table inet filter {
-    chain input {
+flush ruleset
+
+table ip filter {
+    chain INPUT {
         type filter hook input priority 0; policy drop;
-        ct state established,related accept
-        {% for rule in (default_inbound_whitelist + inbound_whitelist) %}
-        {{ rule.protocol }} dport {{ rule.port }} ip saddr {{ rule.source }} accept
+        ct state related,established counter accept
+        iifname "lo" counter accept
+        {% for inbound in (default_inbound_whitelist + (inbound_whitelist | default([]))) %}
+        ip saddr {{ inbound.ip | default(inbound.source) }} {{ inbound.protocol | default('tcp') }} dport {{ inbound.port }} counter accept
         {% endfor %}
     }
-    chain forward {
+    chain FORWARD {
         type filter hook forward priority 0; policy drop;
     }
-    chain output {
+    chain OUTPUT {
         type filter hook output priority 0; policy drop;
-        ct state established,related accept
-        {% for rule in (default_outbound_whitelist + outbound_whitelist) %}
-        {{ rule.protocol }} dport {{ rule.port }} ip daddr {{ rule.destination }} accept
+        ct state related,established counter accept
+        oifname "lo" counter accept
+        {% for outbound in (default_outbound_whitelist + (outbound_whitelist | default([]))) %}
+        ip daddr {{ outbound.ip | default(outbound.destination) }} {{ outbound.protocol | default('tcp') }} sport {{ outbound.port }} counter accept
         {% endfor %}
     }
 }

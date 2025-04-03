@@ -2,8 +2,14 @@
 :INPUT DROP [0:0]
 :FORWARD DROP [0:0]
 :OUTPUT DROP [0:0]
--A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
-{% for rule in (default_inbound_whitelist + inbound_whitelist) %}
--A INPUT -p {{ rule.protocol }} --dport {{ rule.port }} -s {{ rule.source }} -j ACCEPT
+-A INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT
+-A INPUT -i lo -j ACCEPT
+{% for inbound in (default_inbound_whitelist + (inbound_whitelist | default([]))) %}
+-A INPUT -p {{ inbound.protocol | default('tcp') }} --dport {{ inbound.port }} -s {{ inbound.ip | default(inbound.source) | default('0.0.0.0/0') }} -j ACCEPT
+{% endfor %}
+-A OUTPUT -m state --state RELATED,ESTABLISHED -j ACCEPT
+-A OUTPUT -o lo -j ACCEPT
+{% for outbound in (default_outbound_whitelist + (outbound_whitelist | default([]))) %}
+-A OUTPUT -p {{ outbound.protocol | default('tcp') }} --sport {{ outbound.port }} -d {{ outbound.ip | default(outbound.destination) | default('0.0.0.0/0') }} -j ACCEPT
 {% endfor %}
 COMMIT
