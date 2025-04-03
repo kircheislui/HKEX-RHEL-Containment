@@ -3,7 +3,6 @@
   file:
     path: "{{ backup_path }}/{{ profile }}"
     state: directory
-    mode: '0700'
 
 - name: Check if nftables backup exists
   stat:
@@ -55,7 +54,7 @@
   block:
     - name: Restore nftables from backup
       copy:
-        src: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/main.nft"
+        src: "{{ backup_path }}/{{ profile }}/main.nft"
         dest: "/etc/nftables/main.nft"
         remote_src: yes
 
@@ -66,7 +65,7 @@
 
     - name: Remove backup on failure
       file:
-        path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}"
+        path: "{{ backup_path }}/{{ profile }}"
         state: absent
   when:
     - nftables_result is defined

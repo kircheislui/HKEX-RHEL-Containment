@@ -1,58 +1,72 @@
 ---
-- name: HKEX RHEL 8 Containment (iptables)
-  become: yes
-  tasks:
-    # Same tasks as rhel7_containment.yml
-    - name: Create backup directory
-      file:
-        path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}"
-        state: directory
-        mode: '0700'
+- name: Create backup directory
+  file:
+    path: "{{ backup_path }}/{{ profile }}"
+    state: directory
 
-    - name: Check if iptables backup exists
-      stat:
-        path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/iptables"
-      register: backup_check
-      failed_when: backup_check.stat.exists
+- name: Check if nftables backup exists
+  stat:
+    path: "{{ backup_path }}/{{ profile }}/main.nft"
+  register: backup_check
+  failed_when: backup_check.stat.exists
 
-    - name: Backup existing iptables configuration
+- name: Check if nftables config file exists
+  stat:
+    path: "/etc/nftables/main.nft"
+  register: nftables_config_check
+
+- name: Backup existing nftables configuration from file
+  copy:
+    src: "/etc/nftables/main.nft"
+    dest: "{{ backup_path }}/{{ profile }}/main.nft"
+    remote_src: yes
+  when: nftables_config_check.stat.exists
+
+- name: Backup current nftables ruleset if no config file exists
+  shell: nft list ruleset > "{{ backup_path }}/{{ profile }}/main.nft"
+  when: not nftables_config_check.stat.exists
+
+- name: Generate nftables configuration
+  template:
+    src: "nftables/{{ profile | lower }}.j2"
+    dest: "/etc/nftables/main.nft"
+    mode: '0600'
+
+- name: Apply nftables rules
+  service:
+    name: nftables
+    state: restarted
+  register: nftables_result
+
+- name: Verify nftables ruleset
+  shell: nft list ruleset
+  register: nftables_verify
+  changed_when: false
+
+- name: Verify outgoing traffic to verification_list
+  shell: "ping -c 4 {{ item }}"
+  loop: "{{ verification_list }}"
+  register: ping_result
+  failed_when: ping_result.rc != 0
+  when: verification_list | length > 0
+
+- name: Fallback on failure
+  block:
+    - name: Restore nftables from backup
       copy:
-        src: "/etc/sysconfig/iptables"
-        dest: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/iptables"
+        src: "{{ backup_path }}/{{ profile }}/main.nft"
+        dest: "/etc/nftables/main.nft"
         remote_src: yes
 
-    - name: Generate iptables configuration
-      template:
-        src: "iptables/{{ profile | lower }}.j2"
-        dest: "/etc/sysconfig/iptables"
-        mode: '0600'
-
-    - name: Apply iptables rules
+    - name: Restart nftables after restore
       service:
-        name: iptables
+        name: nftables
         state: restarted
-      register: iptables_result
 
-    - name: Verify iptables rules
-      shell: iptables -L -n
-      register: iptables_verify
-      changed_when: false
-
-    - name: Fallback on failure
-      block:
-        - name: Restore iptables from backup
-          copy:
-            src: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/iptables"
-            dest: "/etc/sysconfig/iptables"
-            remote_src: yes
-
-        - name: Restart iptables after restore
-          service:
-            name: iptables
-            state: restarted
-
-        - name: Remove backup on failure
-          file:
-            path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}"
-            state: absent
-      when: iptables_result.failed
+    - name: Remove backup on failure
+      file:
+        path: "{{ backup_path }}/{{ profile }}"
+        state: absent
+  when:
+    - nftables_result is defined
+    - nftables_result.failed or (ping_result is defined and (ping_result.results | selectattr('failed', 'equalto', true) | list | length > 0))

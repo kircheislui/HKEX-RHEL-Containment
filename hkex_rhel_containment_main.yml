@@ -37,3 +37,9 @@
         name: containment
       when:
         - containment_action == 'containment'
+
+    - name: Run Resume role
+      include_role:
+        name: resume
+      when:
+        - containment_action == 'resume'
