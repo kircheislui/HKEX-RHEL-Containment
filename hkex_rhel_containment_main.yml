@@ -32,10 +32,8 @@
       when: containment_action not in ['containment', 'resume']
 
   tasks:
-    - name: Run containment role for RHEL 9
+    - name: Run containment role
       include_role:
         name: containment
-        tasks_from: rhel9_containment.yml
       when:
         - containment_action == 'containment'
-        - ansible_distribution_major_version == '9'
