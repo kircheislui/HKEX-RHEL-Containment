@@ -31,6 +31,12 @@
     src: "iptables/{{ profile | lower }}.j2"
     dest: "/etc/sysconfig/iptables"
     mode: '0600'
+  register: template_result
+
+- name: Debug generated iptables configuration
+  debug:
+    msg: "Generated iptables config content:\n{{ lookup('file', '/etc/sysconfig/iptables') }}"
+  when: template_result.changed
 
 - name: Apply iptables rules
   service:
