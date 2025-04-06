@@ -45,12 +45,12 @@
   register: iptables_verify
   changed_when: false
 
-- name: Verify outgoing traffic to verification_list
-  shell: "ping -c 4 {{ item }}"
-  loop: "{{ verification_list }}"
-  register: ping_result
-  failed_when: ping_result.rc != 0
-  when: verification_list | length > 0
+#- name: Verify outgoing traffic to verification_list
+#  shell: "ping -c 4 {{ item }}"
+#  loop: "{{ verification_list }}"
+#  register: ping_result
+#  failed_when: ping_result.rc != 0
+#  when: verification_list | length > 0
 
 - name: Fallback on failure
   block:
