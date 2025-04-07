@@ -14,10 +14,19 @@
       set_fact:
         limit_hosts: "{{ limit.split(',') }}"
 
+#    - name: Retrieve all inventories from AAP
+#      infra.aap_configuration.controller_hosts:
+#        aap_host: "{{ tower_host }}"
+#        aap_token: "{{ tower_token }}"
+#      register: all_inventories
+
     - name: Retrieve all inventories from AAP
-      infra.aap_configuration.controller_hosts:
-        aap_host: "{{ tower_host }}"
-        aap_token: "{{ tower_token }}"
+      uri:
+        url: "{{ tower_host }}/api/v2/hosts/"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ tower_token }}"
+        validate_certs: false
       register: all_inventories
 
     - name: Find matching inventory for limit hosts
