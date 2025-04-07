@@ -34,3 +34,17 @@ curl -vvv -s -k -X POST \
     "limit": "192.168.1.191"
   }' \
   http://192.168.1.38:31998/api/v2/job_templates/7/launch/
+
+
+  curl -vvv -s -k -X POST \
+  -H "Authorization: Bearer UgvDUmM0AlmCQuzrnuATLYEhIUacTH" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "extra_vars": {
+      "containment_action": "resume",
+      "profile": "FULL"
+    },
+    "limit": "10.211.55.4"
+  }' \
+  http://10.211.55.3:31998/api/v2/job_templates/7/launch/
+HKEX_Resume (END)
