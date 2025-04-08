@@ -1,0 +1,43 @@
+---
+- name: Determine inventory of hosts in limit
+  hosts: localhost
+  gather_facts: no
+  collections:
+    - ansible.tower  # Use awx.awx for AWX
+  vars:
+    tower_host: "{{ tower_host }}"
+    tower_token: "{{ tower_token }}"
+
+  tasks:
+    - name: Get limit hosts from extra vars
+      set_fact:
+        limit_hosts: "{{ limit.split(',') }}"
+
+    - name: Retrieve all inventories from AAP
+      tower_inventory_list:
+        tower_host: "{{ tower_host }}"
+        tower_token: "{{ tower_token }}"
+      register: all_inventories
+
+    - name: Find matching inventory for limit hosts
+      set_fact:
+        matched_inventory: "{{ inventory_result.item.name }}"
+      loop: "{{ all_inventories.inventories }}"
+      loop_control:
+        loop_var: inventory_result
+      when: inventory_result.hosts | default([]) | intersect(limit_hosts) | length > 0
+      failed_when: not matched_inventory is defined
+
+    - name: Fail if no inventory matches
+      fail:
+        msg: "No inventory found containing hosts: {{ limit_hosts }}"
+      when: matched_inventory is not defined
+
+    - name: Output matched inventory
+      debug:
+        msg: "Matched inventory for {{ limit_hosts }}: {{ matched_inventory }}"
+
+    - name: Set workflow artifact
+      set_stats:
+        data:
+          matched_inventory_name: "{{ matched_inventory }}"
