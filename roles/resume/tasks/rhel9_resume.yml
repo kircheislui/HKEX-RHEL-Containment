@@ -13,8 +13,8 @@
 
 - name: Copy nftables from latest backup
   copy:
-    src: "{{ latest_backup }}/main.nft"
-    dest: "/etc/nftables/main.nft"
+    src: "{{ latest_backup }}/nftables.conf"
+    dest: "/etc/sysconfig/nftables.conf"
     remote_src: yes
   when: backup_files.matched > 0
 
