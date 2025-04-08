@@ -15,7 +15,7 @@
         limit_hosts: "{{ limit.split(',') }}"
 
     - name: Retrieve all inventories from AAP
-      controller_hosts:
+      infra.aap_configuration.controller_hosts:
         aap_host: "{{ tower_host }}"
         aap_token: "{{ tower_token }}"
       register: all_inventories
