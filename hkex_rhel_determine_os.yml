@@ -1,6 +1,7 @@
 ---
 - name: Determine inventory of hosts in limit
   hosts: localhost
+  connection: local
   gather_facts: no
   collections:
     - ansible.tower  # Use awx.awx for AWX
