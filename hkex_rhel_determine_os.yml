@@ -4,7 +4,7 @@
   connection: local
   gather_facts: no
   collections:
-    - ansible.tower  # Use awx.awx for AWX
+    - infra.app_configuration  # Use awx.awx for AWX
   vars:
     tower_host: "{{ tower_host }}"
     tower_token: "{{ tower_token }}"
@@ -15,9 +15,9 @@
         limit_hosts: "{{ limit.split(',') }}"
 
     - name: Retrieve all inventories from AAP
-      tower_inventory_list:
-        tower_host: "{{ tower_host }}"
-        tower_token: "{{ tower_token }}"
+      controller_host:
+        aap_host: "{{ tower_host }}"
+        aap_token: "{{ tower_token }}"
       register: all_inventories
 
     - name: Find matching inventory for limit hosts
