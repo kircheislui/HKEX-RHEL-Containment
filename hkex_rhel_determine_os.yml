@@ -10,7 +10,7 @@
   tasks:
     - name: Get limit hosts from extra vars
       set_fact:
-        limit_hosts: "{{ limit.split(',') }}"
+        limit_hosts: "{{ limit.split(',') if limit is string else limit }}"
       
     - name: Retrieve all hosts from AAP
       uri:
@@ -28,97 +28,64 @@
     - name: Map hosts to their inventories
       set_fact:
         host_inventory_map: >-
-          {{ host_inventory_map | default({}) | combine({item.name: item.summary_fields.inventory.name}) }}
+          {{ host_inventory_map | default({}) | combine({item.name: {
+             'id': item.summary_fields.inventory.id,
+             'name': item.summary_fields.inventory.name
+          }}) }}
       loop: "{{ all_hosts }}"
       
-    - name: Debug host-inventory mapping
-      debug:
-        var: host_inventory_map
-        
-    - name: Find matching inventories for limit hosts
+    - name: Find matched hosts in limit
       set_fact:
-        matched_inventories: >-
-          {{ matched_inventories | default([]) + 
-             [host_inventory_map[item]] 
-             if item in host_inventory_map else matched_inventories | default([]) }}
-      loop: "{{ limit_hosts }}"
+        matched_hosts: "{{ all_hosts | selectattr('name', 'in', limit_hosts) | list }}"
       
-    - name: Debug matched inventories
+    - name: Debug matched hosts
       debug:
-        var: matched_inventories
-        
-    - name: Group hosts by inventory
-      set_fact:
-        hosts_by_inventory: >-
-          {{ hosts_by_inventory | default({}) | 
-             combine({item.summary_fields.inventory.name: 
-                     hosts_by_inventory[item.summary_fields.inventory.name] | default([]) + [item.name]}) }}
-      loop: "{{ all_hosts }}"
+        var: matched_hosts
       
-    - name: Debug hosts by inventory
-      debug:
-        var: hosts_by_inventory
-        
-    - name: Get inventory details by ID
-      set_fact:
-        inventory_details: >-
-          {{ inventory_details | default({}) | 
-             combine({item.summary_fields.inventory.name: {
-               'id': item.summary_fields.inventory.id,
-               'description': item.summary_fields.inventory.description,
-               'organization_id': item.summary_fields.inventory.organization_id
-             }}) }}
-      loop: "{{ all_hosts }}"
+    - name: Fail if no hosts found
+      fail:
+        msg: "No hosts found matching limit: {{ limit_hosts | join(', ') }}"
+      when: matched_hosts | length == 0
       
-    - name: Debug inventory details
-      debug:
-        var: inventory_details
-        
-    - name: Set variables for hosts in limit
+    - name: Extract inventory details for matched hosts
       set_fact:
-        limit_host_details: >-
-          {{ limit_host_details | default({}) | 
-             combine({item.name: {
-               'id': item.id,
-               'inventory_id': item.inventory,
-               'inventory_name': item.summary_fields.inventory.name,
-               'has_active_failures': item.has_active_failures,
-               'enabled': item.enabled,
-               'variables': item.variables
-             }}) }}
-      loop: "{{ all_hosts }}"
-      when: item.name in limit_hosts
-        
-    - name: Debug limit host details
+        inventory_list: "{{ matched_hosts | map(attribute='summary_fields.inventory') | list }}"
+      
+    - name: Debug inventory list
       debug:
-        var: limit_host_details
-          
-    - name: Determine unique inventories for limit hosts
+        var: inventory_list
+      
+    - name: Get unique inventory IDs
       set_fact:
-        unique_inventories: "{{ matched_inventories | unique }}"
-        
+        unique_inventory_ids: "{{ inventory_list | map(attribute='id') | unique | list }}"
+      
     - name: Fail if multiple inventories found
       fail:
-        msg: "Error: Hosts are in different inventories: {{ unique_inventories | join(', ') }}"
-      when: unique_inventories | length > 1
-      
-    - name: Fail if no inventory found
-      fail:
-        msg: "Error: No inventory found for hosts: {{ limit_hosts | join(', ') }}"
-      when: unique_inventories | length == 0
-      
+        msg: "Hosts are in different inventories: {{ inventory_list | map(attribute='name') | join(', ') }}"
+      when: unique_inventory_ids | length > 1
+    
     - name: Set matched inventory
       set_fact:
-        matched_inventory: "{{ unique_inventories[0] }}"
-        
+        matched_inventory_id: "{{ unique_inventory_ids[0] }}"
+        matched_inventory_name: "{{ inventory_list[0].name }}"
+      
+    - name: Retrieve inventory details
+      uri:
+        url: "{{ tower_host }}/api/v2/inventories/{{ matched_inventory_id }}/"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ tower_token }}"
+        validate_certs: false
+      register: inventory_details
+      
     - name: Determine OS type from inventory name
       set_fact:
         os_type: >-
-          {% if 'RHEL 9' in matched_inventory %}
+          {% if 'RHEL 9' in matched_inventory_name %}
           rhel9
-          {% elif 'RHEL 8' in matched_inventory %}
+          {% elif 'RHEL 8' in matched_inventory_name %}
           rhel8
-          {% elif 'RHEL 7' in matched_inventory %}
+          {% elif 'RHEL 7' in matched_inventory_name %}
           rhel7
           {% else %}
           unknown
@@ -127,13 +94,28 @@
     - name: Output matched inventory and OS type
       debug:
         msg: 
-          - "Matched inventory for {{ limit_hosts | join(', ') }}: {{ matched_inventory }}"
+          - "Matched inventory for {{ limit_hosts | join(', ') }}: {{ matched_inventory_name }} (ID: {{ matched_inventory_id }})"
           - "Determined OS type: {{ os_type }}"
         
     - name: Set workflow artifacts
       set_stats:
         data:
-          matched_inventory_name: "{{ matched_inventory }}"
-          matched_inventory_id: "{{ inventory_details[matched_inventory].id }}"
+          matched_inventory_name: "{{ matched_inventory_name }}"
+          matched_inventory_id: "{{ matched_inventory_id }}"
           os_type: "{{ os_type }}"
-          hosts_in_inventory: "{{ hosts_by_inventory[matched_inventory] | default([]) }}"
+          # 以下變數可在工作流其他模板中使用
+          target_hosts: "{{ limit_hosts | join(',') }}"
+          inventory: "{{ matched_inventory_id }}"
+          # 增加這個變數使其與 main.yml 兼容
+          ansible_distribution_major_version: >-
+            {% if 'rhel9' in os_type %}9
+            {% elif 'rhel8' in os_type %}8
+            {% elif 'rhel7' in os_type %}7
+            {% else %}unknown
+            {% endif %}
+          # 保留原始的 extra_vars 變數以保持一致
+          containment_action: "{{ containment_action | default('containment') }}"
+          profile: "{{ profile | default('FULL') }}"
+          outbound_whitelist: "{{ outbound_whitelist | default([]) }}"
+          inbound_whitelist: "{{ inbound_whitelist | default([]) }}"
+          verification_list: "{{ verification_list | default([]) }}"
