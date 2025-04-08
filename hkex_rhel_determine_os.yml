@@ -4,7 +4,7 @@
   connection: local
   gather_facts: no
   collections:
-    - infra.app_configuration  # Use awx.awx for AWX
+    - infra.aap_configuration  # Use awx.awx for AWX
   vars:
     tower_host: "{{ tower_host }}"
     tower_token: "{{ tower_token }}"
