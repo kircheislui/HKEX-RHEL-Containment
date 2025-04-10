@@ -47,26 +47,26 @@
         msg: "No hosts found matching limit: {{ limit_hosts | join(', ') }}"
       when: matched_hosts | length == 0
       
-    - name: Group hosts by inventory
+    # Simpler approach using loop to create hosts_by_inventory
+    - name: Initialize hosts_by_inventory
+      set_fact:
+        hosts_by_inventory: {}
+        
+    - name: Build inventory groups
       set_fact:
         hosts_by_inventory: >-
-          {% set result = {} %}
-          {% for host in matched_hosts %}
-            {% set inv_id = host.summary_fields.inventory.id %}
-            {% if inv_id not in result %}
-              {% set _dummy = result.update({inv_id: {
-                'name': host.summary_fields.inventory.name,
-                'hosts': []
-              }}) %}
-            {% endif %}
-            {% set _dummy = result[inv_id].hosts.append(host.name) %}
-          {% endfor %}
-          {{ result }}
+          {{ hosts_by_inventory | combine({
+            (item.summary_fields.inventory.id | string): {
+              'name': item.summary_fields.inventory.name,
+              'hosts': hosts_by_inventory[item.summary_fields.inventory.id | string].hosts | default([]) + [item.name]
+            }
+          })}}
+      loop: "{{ matched_hosts }}"
       
     - name: Display hosts grouped by inventory
       debug:
         var: hosts_by_inventory
-        
+      
     - name: Process each inventory group
       include_tasks: process_inventory_group.yml
       loop: "{{ hosts_by_inventory.keys() | list }}"
