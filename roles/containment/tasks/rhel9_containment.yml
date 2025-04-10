@@ -1,4 +1,9 @@
 ---
+# First set a variable to track overall success
+- name: Initialize success status
+  set_fact:
+    containment_success: true
+
 # Wrap the entire playbook in a block/rescue structure
 - block:
     - name: Create backup directory
@@ -75,13 +80,13 @@
 
   # This rescue block will be triggered by ANY failure in the main block
   rescue:
-    - name: Capture failure reason
+    - name: Set failure 
       set_fact:
-        failure_reason: "{{ ansible_failed_result.msg | default('Unknown error occurred') }}"
+        containment_success: false
 
-    - name: Display failure details
+    - name: Display failure message
       debug:
-        msg: "Containment failed: {{ failure_reason }}"
+        msg: "Containment failed"
 
     # Only perform restore if we have a backup to restore from
     - block:
@@ -127,4 +132,10 @@
   always:
     - name: Final status
       debug:
-        msg: "{{ 'Containment process completed SUCCESSFULLY' if not ansible_failed_task else 'Containment process FAILED' }}"
+        msg: "{{ 'Containment process completed SUCCESSFULLY' if containment_success else 'Containment process FAILED' }}"
+
+# Final task to explicitly fail the play if containment wasn't successful
+- name: Fail if containment was not successful
+  fail:
+    msg: "Containment failed but system was restored to previous state. See above logs for details."
+  when: not containment_success
