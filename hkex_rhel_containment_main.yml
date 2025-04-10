@@ -12,7 +12,7 @@
     hostnames: "{{ hostnames | default([]) }}"
     verification_list: "{{ verification_list | default([]) }}"
     # Process inventory information
-    all_inventories_json: "{{ all_inventories | default('{}') }}"
+    all_inventories_data: "{{ all_inventories | default({}) }}"
     processed_inventories: "{{ all_processed_inventories | default([]) }}"
     # Default variables
     backup_path: "/root/"
@@ -34,12 +34,6 @@
         msg: "Action must be either 'containment' or 'resume'"
       when: containment_action not in ['containment', 'resume']
 
-    - name: Load all inventories data if provided
-      set_fact:
-        all_inventories_data: "{{ all_inventories_json | from_json }}"
-      when: all_inventories_json != '{}'
-      ignore_errors: yes
-
     - name: Display inventory information
       debug:
         msg:
@@ -58,6 +52,18 @@
       debug:
         var: current_inventory
       when: current_inventory is defined
+        
+    - name: Set OS variables from inventory data
+      set_fact:
+        os_type: "{{ current_inventory.os_type | trim }}"
+        ansible_distribution_major_version: "{{ current_inventory.version | trim }}"
+      when: current_inventory is defined
+
+    - name: Display OS variables
+      debug:
+        msg:
+          - "OS Type: {{ os_type | default('undefined') }}"
+          - "Distribution Version: {{ ansible_distribution_major_version }}"
 
   tasks:
     - name: Run containment role

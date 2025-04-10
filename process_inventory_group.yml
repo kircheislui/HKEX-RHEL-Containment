@@ -22,16 +22,7 @@
 
 - name: Determine OS type from inventory name
   set_fact:
-    current_os_type: >-
-      {% if 'RHEL 9' in current_inventory_name %}
-      rhel9
-      {% elif 'RHEL 8' in current_inventory_name %}
-      rhel8
-      {% elif 'RHEL 7' in current_inventory_name %}
-      rhel7
-      {% else %}
-      unknown
-      {% endif %}
+    current_os_type: "{{ 'rhel9' if 'RHEL 9' in current_inventory_name else 'rhel8' if 'RHEL 8' in current_inventory_name else 'rhel7' if 'RHEL 7' in current_inventory_name else 'unknown' }}"
 
 - name: Output matched inventory and OS type
   debug:
@@ -41,12 +32,7 @@
 
 - name: Determine major version
   set_fact:
-    current_major_version: >-
-      {% if 'rhel9' in current_os_type %}9
-      {% elif 'rhel8' in current_os_type %}8
-      {% elif 'rhel7' in current_os_type %}7
-      {% else %}unknown
-      {% endif %} | trim
+    current_major_version: "{{ '9' if current_os_type == 'rhel9' else '8' if current_os_type == 'rhel8' else '7' if current_os_type == 'rhel7' else 'unknown' }}"
 
 - name: Create inventory artifact entry name
   set_fact:
@@ -60,7 +46,7 @@
     data:
       "{{ inventory_entry_name }}": "{{ inventory_id }}"
       "{{ host_list_entry_name }}": "{{ current_inventory_hosts | join(',') }}"
-      "{{ os_type_entry_name }}": "{{ current_os_type | trim }}"
+      "{{ os_type_entry_name }}": "{{ current_os_type }}"
       "{{ version_entry_name }}": "{{ current_major_version }}"
 
 - name: Update processed inventories list
