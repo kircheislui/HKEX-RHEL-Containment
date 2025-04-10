@@ -43,12 +43,127 @@
   register: nftables_verify
   changed_when: false
 
-- name: Verify outgoing traffic to verification_list
-  shell: "ping -c 4 {{ item }}"
-  loop: "{{ verification_list }}"
-  register: ping_result
-  failed_when: ping_result.rc != 0
+# Copy the verification script to the remote host
+- name: Copy verification script
+  copy:
+    content: |
+      #!/usr/bin/env python3
+
+      import socket
+      import sys
+      import json
+      import time
+
+      def check_tcp_port(ip, port, timeout=3):
+          """Test if a TCP port is open"""
+          s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+          s.settimeout(timeout)
+          try:
+              s.connect((ip, port))
+              s.shutdown(socket.SHUT_RDWR)
+              return True
+          except Exception:
+              return False
+          finally:
+              s.close()
+
+      def check_udp_port(ip, port, timeout=3):
+          """Test if a UDP port is responding"""
+          s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+          s.settimeout(timeout)
+          try:
+              s.sendto(b"", (ip, port))
+              data, addr = s.recvfrom(1024)
+              return True
+          except socket.timeout:
+              return False
+          except Exception:
+              return False
+          finally:
+              s.close()
+
+      def main():
+          if len(sys.argv) != 2:
+              print("Usage: %s 'JSON_DATA'" % sys.argv[0])
+              sys.exit(1)
+          
+          try:
+              verification_data = json.loads(sys.argv[1])
+          except json.JSONDecodeError:
+              print("Error parsing JSON data")
+              sys.exit(1)
+          
+          results = []
+          
+          for item in verification_data:
+              ip = item.get('ip')
+              port = int(item.get('port'))
+              protocol = item.get('protocol', 'tcp').lower()
+              expected = item.get('expect', 'success').lower()
+              
+              if protocol == 'tcp':
+                  is_open = check_tcp_port(ip, port)
+              elif protocol == 'udp':
+                  is_open = check_udp_port(ip, port)
+              else:
+                  results.append({
+                      'ip': ip,
+                      'port': port,
+                      'protocol': protocol,
+                      'expected': expected,
+                      'actual': 'error',
+                      'error': 'Unsupported protocol',
+                      'success': False
+                  })
+                  continue
+              
+              actual = 'success' if is_open else 'failure'
+              success = (actual == expected)
+              
+              results.append({
+                  'ip': ip,
+                  'port': port,
+                  'protocol': protocol,
+                  'expected': expected,
+                  'actual': actual,
+                  'success': success
+              })
+          
+          print(json.dumps({'results': results}))
+          
+          # If any test fails (didn't match expectation), exit with non-zero code
+          if not all(result['success'] for result in results):
+              sys.exit(1)
+
+      if __name__ == "__main__":
+          main()
+    dest: "{{ backup_path }}/port_verifier.py"
+    mode: '0755'
   when: verification_list | length > 0
+
+- name: Verify connectivity based on verification list
+  command: "{{ backup_path }}/port_verifier.py '{{ verification_list | to_json }}'"
+  register: verification_results
+  failed_when: false
+  changed_when: false
+  when: verification_list | length > 0
+
+- name: Display verification results
+  debug:
+    var: verification_results.stdout | from_json
+  when: verification_list | length > 0
+
+- name: Check verification results
+  set_fact:
+    verification_failed: true
+  when: 
+    - verification_list | length > 0 
+    - verification_results.rc != 0
+
+- name: Display verification failed message
+  debug:
+    msg: "Verification failed: One or more connectivity checks did not match expected results"
+  when: verification_failed is defined and verification_failed
 
 - name: Fallback on failure
   block:
@@ -68,5 +183,4 @@
         path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}"
         state: absent
   when:
-    - nftables_result is defined
-    - nftables_result.failed or (ping_result is defined and (ping_result.results | selectattr('failed', 'equalto', true) | list | length > 0))
+    - (nftables_result is defined and nftables_result.failed) or (verification_failed is defined and verification_failed)
