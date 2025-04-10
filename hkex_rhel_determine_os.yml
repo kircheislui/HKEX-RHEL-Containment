@@ -108,6 +108,8 @@
             outbound_whitelist: "{{ outbound_whitelist | default([]) }}"
             inbound_whitelist: "{{ inbound_whitelist | default([]) }}"
             verification_list: "{{ verification_list | default([]) }}"
+            aap_ip: "{{ aap_ip }}"
+            dns_ip: "{{ dns_ip }}"
         status_code: [200, 201, 202]
         validate_certs: no  # Set to 'yes' in production
       register: rhel9_job_response
@@ -129,6 +131,8 @@
             outbound_whitelist: "{{ outbound_whitelist | default([]) }}"
             inbound_whitelist: "{{ inbound_whitelist | default([]) }}"
             verification_list: "{{ verification_list | default([]) }}"
+            aap_ip: "{{ aap_ip }}"
+            dns_ip: "{{ dns_ip }}"
         status_code: [200, 201, 202]
         validate_certs: no  # Set to 'yes' in production
       register: rhel8_job_response
@@ -150,6 +154,8 @@
             outbound_whitelist: "{{ outbound_whitelist | default([]) }}"
             inbound_whitelist: "{{ inbound_whitelist | default([]) }}"
             verification_list: "{{ verification_list | default([]) }}"
+            aap_ip: "{{ aap_ip }}"
+            dns_ip: "{{ dns_ip }}"            
         status_code: [200, 201, 202]
         validate_certs: no  # Set to 'yes' in production
       register: rhel7_job_response
