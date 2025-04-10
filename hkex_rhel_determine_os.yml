@@ -102,18 +102,15 @@
         data:
           matched_inventory_name: "{{ matched_inventory_name }}"
           matched_inventory_id: "{{ matched_inventory_id }}"
-          os_type: "{{ os_type }}"
-          # 以下變數可在工作流其他模板中使用
+          os_type: "{{ os_type | trim }}"
           target_hosts: "{{ limit_hosts | join(',') }}"
           inventory: "{{ matched_inventory_id }}"
-          # 增加這個變數使其與 main.yml 兼容
           ansible_distribution_major_version: >-
             {% if 'rhel9' in os_type %}9
             {% elif 'rhel8' in os_type %}8
             {% elif 'rhel7' in os_type %}7
             {% else %}unknown
-            {% endif %}
-          # 保留原始的 extra_vars 變數以保持一致
+            {% endif %} | trim
           containment_action: "{{ containment_action | default('containment') }}"
           profile: "{{ profile | default('FULL') }}"
           outbound_whitelist: "{{ outbound_whitelist | default([]) }}"
