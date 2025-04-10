@@ -4,6 +4,8 @@
   connection: local
   gather_facts: no
   vars:
+    aap_ip: 192.168.1.38
+    dns_ip: 192.168.1.1
     tower_host: "{{ tower_host }}"
     tower_token: "{{ tower_token }}"
     rhel9_job_template_id: 7
