@@ -11,6 +11,9 @@
     outbound_whitelist: "{{ outbound_whitelist | default([]) }}"
     hostnames: "{{ hostnames | default([]) }}"
     verification_list: "{{ verification_list | default([]) }}"
+    # Process inventory information
+    all_inventories_json: "{{ all_inventories | default('{}') }}"
+    processed_inventories: "{{ all_processed_inventories | default([]) }}"
     # Default variables
     backup_path: "/root/"
     default_inbound_whitelist:
@@ -30,6 +33,31 @@
       fail:
         msg: "Action must be either 'containment' or 'resume'"
       when: containment_action not in ['containment', 'resume']
+
+    - name: Load all inventories data if provided
+      set_fact:
+        all_inventories_data: "{{ all_inventories_json | from_json }}"
+      when: all_inventories_json != '{}'
+      ignore_errors: yes
+
+    - name: Display inventory information
+      debug:
+        msg:
+          - "Current host: {{ inventory_hostname }}"
+          - "Processed inventories: {{ processed_inventories }}"
+      
+    - name: Find inventory data for current host
+      set_fact:
+        current_inventory: "{{ item }}"
+      when: inventory_hostname in item.hosts
+      loop: "{{ processed_inventories }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Display current inventory data
+      debug:
+        var: current_inventory
+      when: current_inventory is defined
 
   tasks:
     - name: Run containment role

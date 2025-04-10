@@ -47,70 +47,38 @@
         msg: "No hosts found matching limit: {{ limit_hosts | join(', ') }}"
       when: matched_hosts | length == 0
       
-    - name: Extract inventory details for matched hosts
+    - name: Group hosts by inventory
       set_fact:
-        inventory_list: "{{ matched_hosts | map(attribute='summary_fields.inventory') | list }}"
+        hosts_by_inventory: >-
+          {% set result = {} %}
+          {% for host in matched_hosts %}
+            {% set inv_id = host.summary_fields.inventory.id %}
+            {% if inv_id not in result %}
+              {% set _dummy = result.update({inv_id: {
+                'name': host.summary_fields.inventory.name,
+                'hosts': []
+              }}) %}
+            {% endif %}
+            {% set _dummy = result[inv_id].hosts.append(host.name) %}
+          {% endfor %}
+          {{ result }}
       
-    - name: Debug inventory list
+    - name: Display hosts grouped by inventory
       debug:
-        var: inventory_list
-      
-    - name: Get unique inventory IDs
-      set_fact:
-        unique_inventory_ids: "{{ inventory_list | map(attribute='id') | unique | list }}"
-      
-    - name: Fail if multiple inventories found
-      fail:
-        msg: "Hosts are in different inventories: {{ inventory_list | map(attribute='name') | join(', ') }}"
-      when: unique_inventory_ids | length > 1
-    
-    - name: Set matched inventory
-      set_fact:
-        matched_inventory_id: "{{ unique_inventory_ids[0] }}"
-        matched_inventory_name: "{{ inventory_list[0].name }}"
-      
-    - name: Retrieve inventory details
-      uri:
-        url: "{{ tower_host }}/api/v2/inventories/{{ matched_inventory_id }}/"
-        method: GET
-        headers:
-          Authorization: "Bearer {{ tower_token }}"
-        validate_certs: false
-      register: inventory_details
-      
-    - name: Determine OS type from inventory name
-      set_fact:
-        os_type: >-
-          {% if 'RHEL 9' in matched_inventory_name %}
-          rhel9
-          {% elif 'RHEL 8' in matched_inventory_name %}
-          rhel8
-          {% elif 'RHEL 7' in matched_inventory_name %}
-          rhel7
-          {% else %}
-          unknown
-          {% endif %}
+        var: hosts_by_inventory
         
-    - name: Output matched inventory and OS type
-      debug:
-        msg: 
-          - "Matched inventory for {{ limit_hosts | join(', ') }}: {{ matched_inventory_name }} (ID: {{ matched_inventory_id }})"
-          - "Determined OS type: {{ os_type }}"
-        
-    - name: Set workflow artifacts
+    - name: Process each inventory group
+      include_tasks: process_inventory_group.yml
+      loop: "{{ hosts_by_inventory.keys() | list }}"
+      loop_control:
+        loop_var: inventory_id
+        label: "{{ hosts_by_inventory[inventory_id].name }}"
+
+    - name: Set workflow artifacts for all hosts
       set_stats:
         data:
-          matched_inventory_name: "{{ matched_inventory_name }}"
-          matched_inventory_id: "{{ matched_inventory_id }}"
-          os_type: "{{ os_type | trim }}"
-          target_hosts: "{{ limit_hosts | join(',') }}"
-          inventory: "{{ matched_inventory_id }}"
-          ansible_distribution_major_version: >-
-            {% if 'rhel9' in os_type %}9
-            {% elif 'rhel8' in os_type %}8
-            {% elif 'rhel7' in os_type %}7
-            {% else %}unknown
-            {% endif %} | trim
+          all_inventories: "{{ hosts_by_inventory | to_json }}"
+          all_processed_inventories: "{{ processed_inventories | default([]) }}"
           containment_action: "{{ containment_action | default('containment') }}"
           profile: "{{ profile | default('FULL') }}"
           outbound_whitelist: "{{ outbound_whitelist | default([]) }}"

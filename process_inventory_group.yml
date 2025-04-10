@@ -1,0 +1,68 @@
+---
+# This file should be placed in the same directory as hkex_rhel_determine_os.yml
+- name: Get inventory name
+  set_fact:
+    current_inventory_name: "{{ hosts_by_inventory[inventory_id].name }}"
+    current_inventory_hosts: "{{ hosts_by_inventory[inventory_id].hosts }}"
+
+- name: Display current inventory details
+  debug:
+    msg: 
+      - "Processing inventory: {{ current_inventory_name }} (ID: {{ inventory_id }})"
+      - "Hosts in this inventory: {{ current_inventory_hosts | join(', ') }}"
+
+- name: Retrieve inventory details
+  uri:
+    url: "{{ tower_host }}/api/v2/inventories/{{ inventory_id }}/"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ tower_token }}"
+    validate_certs: false
+  register: inventory_details
+
+- name: Determine OS type from inventory name
+  set_fact:
+    current_os_type: >-
+      {% if 'RHEL 9' in current_inventory_name %}
+      rhel9
+      {% elif 'RHEL 8' in current_inventory_name %}
+      rhel8
+      {% elif 'RHEL 7' in current_inventory_name %}
+      rhel7
+      {% else %}
+      unknown
+      {% endif %}
+
+- name: Output matched inventory and OS type
+  debug:
+    msg: 
+      - "Matched inventory for {{ current_inventory_hosts | join(', ') }}: {{ current_inventory_name }} (ID: {{ inventory_id }})"
+      - "Determined OS type: {{ current_os_type }}"
+
+- name: Determine major version
+  set_fact:
+    current_major_version: >-
+      {% if 'rhel9' in current_os_type %}9
+      {% elif 'rhel8' in current_os_type %}8
+      {% elif 'rhel7' in current_os_type %}7
+      {% else %}unknown
+      {% endif %} | trim
+
+- name: Create inventory artifact entry name
+  set_fact:
+    inventory_entry_name: "inventory_{{ inventory_id }}"
+    host_list_entry_name: "hosts_{{ inventory_id }}"
+    os_type_entry_name: "os_type_{{ inventory_id }}"
+    version_entry_name: "version_{{ inventory_id }}"
+
+- name: Set inventory-specific stats
+  set_stats:
+    data:
+      "{{ inventory_entry_name }}": "{{ inventory_id }}"
+      "{{ host_list_entry_name }}": "{{ current_inventory_hosts | join(',') }}"
+      "{{ os_type_entry_name }}": "{{ current_os_type | trim }}"
+      "{{ version_entry_name }}": "{{ current_major_version }}"
+
+- name: Update processed inventories list
+  set_fact:
+    processed_inventories: "{{ processed_inventories | default([]) + [{'id': inventory_id, 'name': current_inventory_name, 'hosts': current_inventory_hosts, 'os_type': current_os_type, 'version': current_major_version}] }}"
