@@ -6,7 +6,9 @@
   vars:
     tower_host: "{{ tower_host }}"
     tower_token: "{{ tower_token }}"
-
+    rhel9_job_template_id: 7
+    rhel8_job_template_id: 10
+    rhel7_job_template_id: 11
   tasks:
     - name: Get limit hosts from extra vars
       set_fact:
@@ -74,13 +76,86 @@
         loop_var: inventory_id
         label: "{{ hosts_by_inventory[inventory_id].name }}"
 
-    - name: Set workflow artifacts for all hosts
-      set_stats:
-        data:
-          all_inventories: "{{ hosts_by_inventory | to_json }}"
-          all_processed_inventories: "{{ processed_inventories | default([]) }}"
-          containment_action: "{{ containment_action | default('containment') }}"
-          profile: "{{ profile | default('FULL') }}"
-          outbound_whitelist: "{{ outbound_whitelist | default([]) }}"
-          inbound_whitelist: "{{ inbound_whitelist | default([]) }}"
-          verification_list: "{{ verification_list | default([]) }}"
+    - name: Get consolidated host lists by OS type
+      set_fact:
+        rhel9_hosts: "{{ processed_inventories | selectattr('os_type', 'equalto', 'rhel9') | map(attribute='hosts') | flatten | join(',') }}"
+        rhel8_hosts: "{{ processed_inventories | selectattr('os_type', 'equalto', 'rhel8') | map(attribute='hosts') | flatten | join(',') }}"
+        rhel7_hosts: "{{ processed_inventories | selectattr('os_type', 'equalto', 'rhel7') | map(attribute='hosts') | flatten | join(',') }}"
+
+    - name: Display consolidated host lists
+      debug:
+        msg:
+          - "RHEL 9 hosts: {{ rhel9_hosts }}"
+          - "RHEL 8 hosts: {{ rhel8_hosts }}"
+          - "RHEL 7 hosts: {{ rhel7_hosts }}"
+
+
+    - name: Launch RHEL 9 containment job
+      uri:
+        url: "{{ aap_server }}/api/v2/job_templates/{{ rhel9_job_template_id }}/launch/"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ tower_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          limit: "{{ rhel9_hosts }}"
+          extra_vars:
+            containment_action: "{{ containment_action | default('containment') }}"
+            profile: "{{ profile | default('FULL') }}"
+            outbound_whitelist: "{{ outbound_whitelist | default([]) }}"
+            inbound_whitelist: "{{ inbound_whitelist | default([]) }}"
+            verification_list: "{{ verification_list | default([]) }}"
+        status_code: [200, 201, 202]
+        validate_certs: no  # Set to 'yes' in production
+      register: rhel9_job_response
+      when: rhel9_hosts != ""
+
+    - name: Launch RHEL 8 containment job
+      uri:
+        url: "{{ aap_server }}/api/v2/job_templates/{{ rhel8_job_template_id }}/launch/"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ tower_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          limit: "{{ rhel8_hosts }}"
+          extra_vars:
+            containment_action: "{{ containment_action | default('containment') }}"
+            profile: "{{ profile | default('FULL') }}"
+            outbound_whitelist: "{{ outbound_whitelist | default([]) }}"
+            inbound_whitelist: "{{ inbound_whitelist | default([]) }}"
+            verification_list: "{{ verification_list | default([]) }}"
+        status_code: [200, 201, 202]
+        validate_certs: no  # Set to 'yes' in production
+      register: rhel8_job_response
+      when: rhel8_hosts != ""
+
+    - name: Launch RHEL 7 containment job
+      uri:
+        url: "{{ aap_server }}/api/v2/job_templates/{{ c }}/launch/"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ tower_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          limit: "{{ rhel7_hosts }}"
+          extra_vars:
+            containment_action: "{{ containment_action | default('containment') }}"
+            profile: "{{ profile | default('FULL') }}"
+            outbound_whitelist: "{{ outbound_whitelist | default([]) }}"
+            inbound_whitelist: "{{ inbound_whitelist | default([]) }}"
+            verification_list: "{{ verification_list | default([]) }}"
+        status_code: [200, 201, 202]
+        validate_certs: no  # Set to 'yes' in production
+      register: rhel7_job_response
+      when: rhel7_hosts != ""
+
+    - name: Display launched job information
+      debug:
+        msg:
+          - "RHEL 9 job ID: {{ (rhel9_job_response.json.id | default('No job launched')) if rhel9_hosts != '' else 'No RHEL 9 hosts found' }}"
+          - "RHEL 8 job ID: {{ (rhel8_job_response.json.id | default('No job launched')) if rhel8_hosts != '' else 'No RHEL 8 hosts found' }}"
+          - "RHEL 7 job ID: {{ (rhel7_job_response.json.id | default('No job launched')) if rhel7_hosts != '' else 'No RHEL 7 hosts found' }}"
