@@ -3,8 +3,8 @@
   hosts: all
   gather_facts: yes
   vars:
-    aap_ip: "192.168.122.11"
-    dns_ip: "192.168.122.12"
+    aap_ip: "10.211.55.3"
+    dns_ip: "10.211.55.1"
     # Extra variables from API
     containment_action: "{{ containment_action }}"
     profile: "{{ profile | default('') }}"
