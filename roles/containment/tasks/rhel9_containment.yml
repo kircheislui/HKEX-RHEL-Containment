@@ -37,42 +37,66 @@
     name: nftables
     state: restarted
   register: nftables_result
+  ignore_errors: yes  # Don't stop on error, continue to verify and fallback if needed
 
 - name: Verify nftables ruleset
   shell: nft list ruleset
   register: nftables_verify
   changed_when: false
+  ignore_errors: yes
 
-# Copy the verification script to the remote host
-- name: Copy verification script
-  copy:
-    src: "files/port_verifier.py"
-    dest: "{{ backup_path }}/port_verifier.py"
-    mode: '0755'
+# Using block/rescue for the verification process
+- block:
+    # Copy the verification script to the remote host
+    - name: Copy verification script
+      copy:
+        src: "files/port_verifier.py"
+        dest: "{{ backup_path }}/port_verifier.py"
+        mode: '0755'
+      when: verification_list | length > 0
+
+    - name: Verify connectivity based on verification list
+      command: "{{ backup_path }}/port_verifier.py '{{ verification_list | to_json }}'"
+      register: verification_results
+      changed_when: false
+      when: verification_list | length > 0
+      # We don't use failed_when here since we handle failure in the rescue block
+
+    - name: Set verification status
+      set_fact:
+        verification_failed: "{{ verification_results.rc != 0 }}"
+      when: verification_list | length > 0 and verification_results is defined
+
+    - name: Display verification results
+      debug:
+        var: verification_results.stdout | from_json
+      when: verification_list | length > 0 and verification_results is defined
+
+    - name: Fail if verification failed
+      fail:
+        msg: "Verification failed: One or more connectivity checks did not match expected results"
+      when: verification_list | length > 0 and verification_failed | bool
+      
+  rescue:
+    - name: Display failed verification details
+      debug:
+        msg: "Verification failed: Connectivity checks did not match expected results"
+      
+    - name: Set verification failed flag
+      set_fact:
+        verification_failed: true
+
   when: verification_list | length > 0
 
-- name: Verify connectivity based on verification list
-  command: "{{ backup_path }}/port_verifier.py '{{ verification_list | to_json }}'"
-  register: verification_results
-  failed_when: verification_results.rc != 0
-  changed_when: false
-  when: verification_list | length > 0
+# Final status checking and fallback if needed
+- name: Check for failures
+  set_fact:
+    containment_failed: "{{ (nftables_result is defined and nftables_result.failed) or 
+                          (verification_failed is defined and verification_failed | bool) }}"
 
-- name: Display verification results (if successful)
+- name: Display final status
   debug:
-    var: verification_results.stdout | from_json
-  when: 
-    - verification_list | length > 0 
-    - verification_results is defined
-    - verification_results.rc == 0
-
-- name: Display failed verification results
-  debug:
-    msg: "Verification failed: One or more connectivity checks did not match expected results"
-  when: 
-    - verification_list | length > 0
-    - verification_results is defined
-    - verification_results.rc != 0
+    msg: "{{ 'Containment FAILED - will restore previous configuration' if containment_failed | bool else 'Containment SUCCESSFUL' }}"
 
 - name: Fallback on failure
   block:
@@ -91,6 +115,8 @@
       file:
         path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}"
         state: absent
-  when:
-    - (nftables_result is defined and nftables_result.failed) or 
-      (verification_results is defined and verification_results.rc != 0)
+        
+    - name: Verification after restore
+      debug:
+        msg: "Original configuration has been restored. Please verify manually that connectivity is working correctly."
+  when: containment_failed | bool
