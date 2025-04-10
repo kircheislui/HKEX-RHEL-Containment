@@ -17,7 +17,7 @@ table ip filter {
         ct state related,established counter accept
         oifname "lo" counter accept
         {% for outbound in (default_outbound_whitelist + (outbound_whitelist | default([]))) %}
-        ip daddr {{ outbound.ip | default(outbound.destination) }} {{ outbound.protocol | default('tcp') }} sport {{ outbound.port }} counter accept
+        ip daddr {{ outbound.ip | default(outbound.destination) }} {{ outbound.protocol | default('tcp') }} dport {{ outbound.port }} counter accept
         {% endfor %}
     }
 }
