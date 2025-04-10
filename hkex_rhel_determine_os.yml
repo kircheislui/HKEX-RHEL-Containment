@@ -92,7 +92,7 @@
 
     - name: Launch RHEL 9 containment job
       uri:
-        url: "{{ aap_server }}/api/v2/job_templates/{{ rhel9_job_template_id }}/launch/"
+        url: "{{ tower_host }}/api/v2/job_templates/{{ rhel9_job_template_id }}/launch/"
         method: POST
         headers:
           Authorization: "Bearer {{ tower_token }}"
@@ -113,7 +113,7 @@
 
     - name: Launch RHEL 8 containment job
       uri:
-        url: "{{ aap_server }}/api/v2/job_templates/{{ rhel8_job_template_id }}/launch/"
+        url: "{{ tower_host }}/api/v2/job_templates/{{ rhel8_job_template_id }}/launch/"
         method: POST
         headers:
           Authorization: "Bearer {{ tower_token }}"
@@ -134,7 +134,7 @@
 
     - name: Launch RHEL 7 containment job
       uri:
-        url: "{{ aap_server }}/api/v2/job_templates/{{ c }}/launch/"
+        url: "{{ tower_host }}/api/v2/job_templates/{{ rhel7_job_template_id }}/launch/"
         method: POST
         headers:
           Authorization: "Bearer {{ tower_token }}"
