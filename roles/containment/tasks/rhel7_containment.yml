@@ -1,74 +1,132 @@
 ---
-- name: Create backup directory
-  file:
-    path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}"
-    state: directory
+# First set a variable to track overall success
+- name: Initialize success status
+  set_fact:
+    containment_success: true
 
-- name: Check if iptables backup exists
-  stat:
-    path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/iptables"
-  register: backup_check
-  failed_when: backup_check.stat.exists
+# Wrap the entire playbook in a block/rescue structure
+- block:
+    - name: Create backup directory
+      file:
+        path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}"
+        state: directory
 
-- name: Check if iptables config file exists
-  stat:
-    path: "/etc/sysconfig/iptables"
-  register: iptables_config_check
+    - name: Check if iptables backup exists
+      stat:
+        path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/iptables.conf"
+      register: backup_check
+      failed_when: backup_check.stat.exists
 
-- name: Backup existing iptables configuration from file
-  copy:
-    src: "/etc/sysconfig/iptables"
-    dest: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/iptables"
-    remote_src: yes
-  when: iptables_config_check.stat.exists
+    - name: Check if iptables config file exists
+      stat:
+        path: "/etc/sysconfig/iptables.conf"
+      register: iptables_config_check
 
-- name: Backup current iptables ruleset if no config file exists
-  shell: iptables-save > "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/iptables"
-  when: not iptables_config_check.stat.exists
-
-- name: Generate iptables configuration
-  template:
-    src: "iptables/{{ profile | lower }}.j2"
-    dest: "/etc/sysconfig/iptables"
-    mode: '0600'
-  register: template_result
-
-
-- name: Apply iptables rules
-  service:
-    name: iptables
-    state: restarted
-  register: iptables_result
-
-- name: Verify iptables ruleset
-  shell: iptables -L -n
-  register: iptables_verify
-  changed_when: false
-
-#- name: Verify outgoing traffic to verification_list
-#  shell: "ping -c 4 {{ item }}"
-#  loop: "{{ verification_list }}"
-#  register: ping_result
-#  failed_when: ping_result.rc != 0
-#  when: verification_list | length > 0
-
-- name: Fallback on failure
-  block:
-    - name: Restore iptables from backup
+    - name: Backup existing iptables configuration from file
       copy:
-        src: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/iptables"
-        dest: "/etc/sysconfig/iptables"
+        src: "/etc/sysconfig/iptables.conf"
+        dest: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/iptables.conf"
         remote_src: yes
+      when: iptables_config_check.stat.exists
 
-    - name: Restart iptables after restore
+    - name: Generate iptables configuration
+      template:
+        src: "iptables/{{ profile | lower }}.j2"
+        dest: "/etc/sysconfig/iptables.conf"
+        mode: '0600'
+
+    - name: Apply iptables rules
       service:
         name: iptables
         state: restarted
+      register: iptables_result
 
-    - name: Remove backup on failure
-      file:
-        path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}"
-        state: absent
-  when:
-    - iptables_result is defined
-    - iptables_result.failed or (ping_result is defined and (ping_result.results | selectattr('failed', 'equalto', true) | list | length > 0))
+    # Only proceed with verification if iptables was successfully applied
+    - block:
+        # Copy the verification script to the remote host
+        - name: Copy verification script
+          copy:
+            src: "files/port_verifier.py"
+            dest: "{{ backup_path }}/port_verifier.py"
+            mode: '0755'
+          when: verification_list | length > 0
+
+        - name: Verify connectivity based on verification list
+          command: "{{ backup_path }}/port_verifier.py '{{ verification_list | to_json }}'"
+          register: verification_results
+          changed_when: false
+          when: verification_list | length > 0
+
+        # This task will fail if verification fails, triggering the rescue
+        - name: Check verification results
+          fail:
+            msg: "Verification failed: One or more connectivity checks did not match expected results"
+          when: verification_list | length > 0 and verification_results.rc != 0
+
+        - name: Display successful verification results
+          debug:
+            var: verification_results.stdout | from_json
+          when: verification_list | length > 0 and verification_results is defined
+      when: not (iptables_result is defined and iptables_result.failed)
+
+  # This rescue block will be triggered by ANY failure in the main block
+  rescue:
+    - name: Set failure 
+      set_fact:
+        containment_success: false
+
+    - name: Display failure message
+      debug:
+        msg: "Containment failed"
+
+    # Only perform restore if we have a backup to restore from
+    - block:
+        - name: Check if backup exists for restore
+          stat:
+            path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/iptables.conf"
+          register: restore_check
+
+        - name: Restore iptables from backup
+          copy:
+            src: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/iptables.conf"
+            dest: "/etc/sysconfig/iptables.conf"
+            remote_src: yes
+          when: restore_check.stat.exists
+
+        - name: Restart iptables after restore
+          service:
+            name: iptables
+            state: restarted
+          when: restore_check.stat.exists
+
+        - name: Remove backup directory after restore
+          file:
+            path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}"
+            state: absent
+          when: restore_check.stat.exists
+
+        - name: Notification after restore
+          debug:
+            msg: "Original configuration has been restored. Please verify manually that connectivity is working correctly."
+          when: restore_check.stat.exists
+            
+        - name: Notification when no backup to restore
+          debug:
+            msg: "No backup was created yet, so no restoration was performed."
+          when: not restore_check.stat.exists
+      rescue:
+        - name: Report restore failure
+          debug:
+            msg: "WARNING: Failed to restore original configuration. Manual intervention may be required!"
+
+  # Always runs, regardless of success or failure
+  always:
+    - name: Final status
+      debug:
+        msg: "{{ 'Containment process completed SUCCESSFULLY' if containment_success else 'Containment process FAILED' }}"
+
+# Final task to explicitly fail the play if containment wasn't successful
+- name: Fail if containment was not successful
+  fail:
+    msg: "Containment failed but system was restored to previous state. See above logs for details."
+  when: not containment_success

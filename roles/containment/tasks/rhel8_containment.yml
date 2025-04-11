@@ -1,72 +1,141 @@
 ---
-- name: Create backup directory
-  file:
-    path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}"
-    state: directory
+# First set a variable to track overall success
+- name: Initialize success status
+  set_fact:
+    containment_success: true
 
-- name: Check if nftables backup exists
-  stat:
-    path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables.conf"
-  register: backup_check
-  failed_when: backup_check.stat.exists
+# Wrap the entire playbook in a block/rescue structure
+- block:
+    - name: Create backup directory
+      file:
+        path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}"
+        state: directory
 
-- name: Check if nftables config file exists
-  stat:
-    path: "/etc/sysconfig/nftables.conf"
-  register: nftables_config_check
+    - name: Check if nftables backup exists
+      stat:
+        path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables.conf"
+      register: backup_check
+      failed_when: backup_check.stat.exists
 
-- name: Backup existing nftables configuration from file
-  copy:
-    src: "/etc/sysconfig/nftables.conf"
-    dest: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables.conf"
-    remote_src: yes
-  when: nftables_config_check.stat.exists
+    - name: Check if nftables config file exists
+      stat:
+        path: "/etc/sysconfig/nftables.conf"
+      register: nftables_config_check
 
-- name: Backup current nftables ruleset if no config file exists
-  shell: nft list ruleset > "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables.conf"
-  when: not nftables_config_check.stat.exists
-
-- name: Generate nftables configuration
-  template:
-    src: "nftables/{{ profile | lower }}.j2"
-    dest: "/etc/sysconfig/nftables.conf"
-    mode: '0600'
-
-- name: Apply nftables rules
-  service:
-    name: nftables
-    state: restarted
-  register: nftables_result
-
-- name: Verify nftables ruleset
-  shell: nft list ruleset
-  register: nftables_verify
-  changed_when: false
-
-- name: Verify outgoing traffic to verification_list
-  shell: "ping -c 4 {{ item }}"
-  loop: "{{ verification_list }}"
-  register: ping_result
-  failed_when: ping_result.rc != 0
-  when: verification_list | length > 0
-
-- name: Fallback on failure
-  block:
-    - name: Restore nftables from backup
+    - name: Backup existing nftables configuration from file
       copy:
-        src: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables.conf"
-        dest: "/etc/sysconfig/nftables.conf"
+        src: "/etc/sysconfig/nftables.conf"
+        dest: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables.conf"
         remote_src: yes
+      when: nftables_config_check.stat.exists
 
-    - name: Restart nftables after restore
+    - name: Backup current nftables ruleset if no config file exists
+      shell: nft list ruleset > "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables.conf"
+      when: not nftables_config_check.stat.exists
+
+    - name: Generate nftables configuration
+      template:
+        src: "nftables/{{ profile | lower }}.j2"
+        dest: "/etc/sysconfig/nftables.conf"
+        mode: '0600'
+
+    - name: Apply nftables rules
       service:
         name: nftables
         state: restarted
+      register: nftables_result
 
-    - name: Remove backup on failure
-      file:
-        path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}"
-        state: absent
-  when:
-    - nftables_result is defined
-    - nftables_result.failed or (ping_result is defined and (ping_result.results | selectattr('failed', 'equalto', true) | list | length > 0))
+    - name: Verify nftables ruleset
+      shell: nft list ruleset
+      register: nftables_verify
+      changed_when: false
+
+    # Only proceed with verification if nftables was successfully applied
+    - block:
+        # Copy the verification script to the remote host
+        - name: Copy verification script
+          copy:
+            src: "files/port_verifier.py"
+            dest: "{{ backup_path }}/port_verifier.py"
+            mode: '0755'
+          when: verification_list | length > 0
+
+        - name: Verify connectivity based on verification list
+          command: "{{ backup_path }}/port_verifier.py '{{ verification_list | to_json }}'"
+          register: verification_results
+          changed_when: false
+          when: verification_list | length > 0
+
+        # This task will fail if verification fails, triggering the rescue
+        - name: Check verification results
+          fail:
+            msg: "Verification failed: One or more connectivity checks did not match expected results"
+          when: verification_list | length > 0 and verification_results.rc != 0
+
+        - name: Display successful verification results
+          debug:
+            var: verification_results.stdout | from_json
+          when: verification_list | length > 0 and verification_results is defined
+      when: not (nftables_result is defined and nftables_result.failed)
+
+  # This rescue block will be triggered by ANY failure in the main block
+  rescue:
+    - name: Set failure 
+      set_fact:
+        containment_success: false
+
+    - name: Display failure message
+      debug:
+        msg: "Containment failed"
+
+    # Only perform restore if we have a backup to restore from
+    - block:
+        - name: Check if backup exists for restore
+          stat:
+            path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables.conf"
+          register: restore_check
+
+        - name: Restore nftables from backup
+          copy:
+            src: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables.conf"
+            dest: "/etc/sysconfig/nftables.conf"
+            remote_src: yes
+          when: restore_check.stat.exists
+
+        - name: Restart nftables after restore
+          service:
+            name: nftables
+            state: restarted
+          when: restore_check.stat.exists
+
+        - name: Remove backup directory after restore
+          file:
+            path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}"
+            state: absent
+          when: restore_check.stat.exists
+
+        - name: Notification after restore
+          debug:
+            msg: "Original configuration has been restored. Please verify manually that connectivity is working correctly."
+          when: restore_check.stat.exists
+            
+        - name: Notification when no backup to restore
+          debug:
+            msg: "No backup was created yet, so no restoration was performed."
+          when: not restore_check.stat.exists
+      rescue:
+        - name: Report restore failure
+          debug:
+            msg: "WARNING: Failed to restore original configuration. Manual intervention may be required!"
+
+  # Always runs, regardless of success or failure
+  always:
+    - name: Final status
+      debug:
+        msg: "{{ 'Containment process completed SUCCESSFULLY' if containment_success else 'Containment process FAILED' }}"
+
+# Final task to explicitly fail the play if containment wasn't successful
+- name: Fail if containment was not successful
+  fail:
+    msg: "Containment failed but system was restored to previous state. See above logs for details."
+  when: not containment_success
