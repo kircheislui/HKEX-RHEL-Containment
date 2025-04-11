@@ -46,13 +46,13 @@
         # Copy the verification script to the remote host
         - name: Copy verification script
           copy:
-            src: "files/port_verifier.py"
-            dest: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/port_verifier.py"
+            src: "files/port_verifier.sh"
+            dest: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/port_verifier.sh"
             mode: '0755'
           when: verification_list | length > 0
 
         - name: Verify connectivity based on verification list
-          command: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/port_verifier.py '{{ verification_list | to_json }}'"
+          command: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/port_verifier.sh '{{ verification_list | to_json }}'"
           register: verification_results
           changed_when: false
           when: verification_list | length > 0
