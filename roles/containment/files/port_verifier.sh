@@ -1,10 +1,11 @@
 #!/bin/bash
 
-# port_verifier.sh - Simple port checking script
+# port_verifier.sh - Simple port checking script without hardcoding
 # Usage: ./port_verifier.sh '[{"ip":"192.168.0.18","port":22,"protocol":"tcp","expect":"success"}]'
 
-# Set strict error handling
+# Set safe error handling
 set -o nounset
+set -o pipefail
 
 # Function to check if a TCP port is open
 check_tcp_port() {
@@ -84,14 +85,21 @@ check_udp_port() {
   fi
 }
 
-# Check if string is a valid JSON object
-is_valid_json_object() {
-  local obj="$1"
-  # Check if it has curly braces and at least one key-value pair
-  if [[ "$obj" =~ ^\{.*:.*\}$ ]]; then
-    return 0  # Valid
+# Extract value from JSON object
+extract_value() {
+  local json="$1"
+  local key="$2"
+  
+  # Extract value for the given key
+  local pattern="\"$key\"[[:space:]]*:[[:space:]]*"
+  
+  # Check if it's a string value (has quotes)
+  if echo "$json" | grep -q "\"$key\"[[:space:]]*:[[:space:]]*\""; then
+    # It's a string value with quotes
+    echo "$json" | sed -n 's/.*"'"$key"'"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'
   else
-    return 1  # Invalid
+    # It's a numeric value without quotes
+    echo "$json" | sed -n 's/.*"'"$key"'"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p'
   fi
 }
 
@@ -103,92 +111,79 @@ main() {
     exit 1
   fi
   
-  # Initialize results array
+  # Initialize results array and success tracker
   declare -a results=()
   all_success=true
   
-  # Get JSON input
-  json_input="$1"
+  # Get the JSON input
+  local input="$1"
   
   # Clean the input - strip unnecessary whitespace
-  json_input=$(echo "$json_input" | tr -d '\n\r' | sed 's/[[:space:]]\+/ /g')
+  input=$(echo "$input" | tr -d '\n\r')
   
   # Validate that we have a JSON array
-  if [[ ! "$json_input" =~ ^\[.*\]$ ]]; then
+  if [[ ! "$input" =~ ^\[.*\]$ ]]; then
     echo "Error: Input is not a valid JSON array" >&2
     exit 1
   fi
   
-  # Extract the actual list items more reliably
-  # First, remove the enclosing square brackets
-  json_input="${json_input#\[}"
-  json_input="${json_input%\]}"
+  # Extract the items more reliably by using jq-like approach with sed
+  # Remove the outer brackets
+  content="${input#\[}"
+  content="${content%\]}"
   
-  # If no items, exit early
-  if [[ -z "$json_input" ]]; then
+  # Check if we have content
+  if [[ -z "$content" ]]; then
     echo '{"results":[]}' 
     exit 0
   fi
   
-  # Handle verification_list directly
-  # This improved approach extracts JSON objects more reliably
-  # Match all complete objects with balanced braces
-  while [[ "$json_input" =~ \{([^{}]|\{[^{}]*\})*\} ]]; do
-    # Extract the matched object
-    obj="${BASH_REMATCH[0]}"
+  # Split the items using temporary delimiter
+  # Replace },{
+  content=$(echo "$content" | sed 's/},{/@@@/g')
+  
+  # Now we can split by our delimiter
+  IFS="@@@" read -ra items <<< "$content"
+  
+  # Process each item
+  for item in "${items[@]}"; do
+    # Clean up the item to ensure it has proper JSON format
+    item=$(echo "$item" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
     
-    # Skip empty or invalid objects
-    if ! is_valid_json_object "$obj"; then
-      # Remove this object from the input and continue
-      json_input="${json_input/${BASH_REMATCH[0]}/}"
+    # Add braces if missing
+    if [[ ! "$item" =~ ^\{.*\}$ ]]; then
+      item="{$item}"
+    fi
+    
+    # Skip empty objects
+    if [[ "$item" == "{}" ]]; then
       continue
     fi
     
-    # Extract values more reliably
-    ip=""
-    port=""
-    protocol="tcp"  # Default
-    expect="success"  # Default
+    # Extract the values using our helper function
+    ip=$(extract_value "$item" "ip")
+    port=$(extract_value "$item" "port")
+    protocol=$(extract_value "$item" "protocol")
+    expect=$(extract_value "$item" "expect")
     
-    # Extract IP
-    if [[ "$obj" =~ \"ip\"[[:space:]]*:[[:space:]]*\"([^\"]*)\" ]]; then
-      ip="${BASH_REMATCH[1]}"
-    fi
+    # Set defaults for optional fields
+    protocol="${protocol:-tcp}"
+    expect="${expect:-success}"
     
-    # Extract port
-    if [[ "$obj" =~ \"port\"[[:space:]]*:[[:space:]]*([0-9]+) ]]; then
-      port="${BASH_REMATCH[1]}"
-    fi
-    
-    # Extract protocol
-    if [[ "$obj" =~ \"protocol\"[[:space:]]*:[[:space:]]*\"([^\"]*)\" ]]; then
-      protocol="${BASH_REMATCH[1]}"
-    fi
-    
-    # Extract expect
-    if [[ "$obj" =~ \"expect\"[[:space:]]*:[[:space:]]*\"([^\"]*)\" ]]; then
-      expect="${BASH_REMATCH[1]}"
-    fi
-    
-    # Validate required fields
+    # Skip items without required fields
     if [[ -z "$ip" ]]; then
-      echo "Warning: Missing IP address in object. Skipping." >&2
-      # Remove this object from the input and continue
-      json_input="${json_input/${BASH_REMATCH[0]}/}"
+      echo "Warning: Missing IP address in item. Skipping." >&2
       continue
     fi
     
     if [[ -z "$port" ]]; then
-      echo "Warning: Missing port in object. Skipping." >&2
-      # Remove this object from the input and continue
-      json_input="${json_input/${BASH_REMATCH[0]}/}"
+      echo "Warning: Missing port in item. Skipping." >&2
       continue
     fi
     
-    # Check connectivity
+    # Perform the check
     echo "Checking $protocol://$ip:$port..." >&2
     
-    # Perform test based on protocol
     if [[ "$protocol" == "tcp" ]]; then
       if check_tcp_port "$ip" "$port"; then
         actual="success"
@@ -203,6 +198,7 @@ main() {
       fi
     else
       # Unsupported protocol
+      echo "Error: Unsupported protocol $protocol" >&2
       actual="error"
     fi
     
@@ -228,35 +224,25 @@ main() {
     results+=("$result")
     
     echo "Result: $actual (Expected: $expect)" >&2
-    
-    # Remove this object from the input and continue
-    json_input="${json_input/${BASH_REMATCH[0]}/}"
-    
-    # Remove leading comma if present
-    json_input="${json_input#,}"
-    # Remove trailing comma if present
-    json_input="${json_input%,}"
-    # Remove leading whitespace
-    json_input="${json_input#"${json_input%%[![:space:]]*}"}"
-    # Remove trailing whitespace
-    json_input="${json_input%"${json_input##*[![:space:]]}"}"
   done
   
-  # If no valid objects were processed, print warning
+  # Combine results into final JSON
+  final_json='{"results":['
+  
+  # If no valid results, return empty array
   if [ ${#results[@]} -eq 0 ]; then
-    echo "Warning: No valid objects found in input JSON" >&2
     echo '{"results":[]}' 
     exit 1
   fi
   
-  # Combine results into final JSON
-  final_json='{"results":['
+  # Add results to JSON with commas
   for i in "${!results[@]}"; do
     if [ $i -gt 0 ]; then
       final_json+=','
     fi
     final_json+="${results[$i]}"
   done
+  
   final_json+=']}'
   
   # Output final JSON
