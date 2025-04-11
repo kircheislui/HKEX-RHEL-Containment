@@ -4,18 +4,7 @@
   set_fact:
     containment_success: true
 
-- name: Gather service facts
-  ansible.builtin.service_facts:
 
-- name: Get status of nftables service
-  ansible.builtin.set_fact:
-    nftables_status: "{{ ansible_facts.services['nftables.service'].state if ansible_facts.services['nftables.service'] is defined else 'unknown' }}"
-
-- name: Save nftables service status to file
-  ansible.builtin.copy:
-    content: "{{ nftables_status }}"
-    dest: "{{ backup_path }}/nftables_service_status"
-    mode: '0644'
 
 # Wrap the entire playbook in a block/rescue structure
 - block:
@@ -41,6 +30,19 @@
         dest: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables.conf"
         remote_src: yes
       when: nftables_config_check.stat.exists
+
+    - name: Gather service facts
+      ansible.builtin.service_facts:
+
+    - name: Get status of nftables service
+      ansible.builtin.set_fact:
+        nftables_status: "{{ ansible_facts.services['nftables.service'].state if ansible_facts.services['nftables.service'] is defined else 'unknown' }}"
+
+    - name: Save nftables service status to file
+      ansible.builtin.copy:
+        content: "{{ nftables_status }}"
+        dest: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables_service_status"
+        mode: '0644'
 
     - name: Backup current nftables ruleset if no config file exists
       shell: nft list ruleset > "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables.conf"
