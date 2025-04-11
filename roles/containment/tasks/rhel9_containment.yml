@@ -122,7 +122,7 @@
 
         - name: Get stored nftables service status
           ansible.builtin.set_fact:
-            nftables_status: "{{ lookup('file', '{{ backup_path }}//{{ profile }}-{{ ansible_date_time.date }}/nftables_service_status.json', errors='ignore') | default('{}') | from_json }}"
+            nftables_status: "{{ lookup('file', '{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables_service_status.json', errors='ignore') | default('{}') | from_json }}"
 
         - name: Restore nftables service active state
           ansible.builtin.service:
