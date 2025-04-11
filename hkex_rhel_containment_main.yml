@@ -14,17 +14,10 @@
     processed_inventories: "{{ all_processed_inventories | default([]) }}"
     # Default variables
     backup_path: "/root/"
-    default_inbound_whitelist:
-      - ip: "{{ aap_ip }}"
-        port: 22
-        protocol: "tcp"
-    default_outbound_whitelist:
-      - ip: "{{ dns_ip }}"
-        port: 53
-        protocol: "tcp"
-      - ip: "{{ dns_ip }}"
-        port: 53
-        protocol: "udp"
+    
+    # Initialize empty lists for whitelists
+    default_inbound_whitelist: []
+    default_outbound_whitelist: []
 
   pre_tasks:
     - name: Validate action variable
@@ -33,6 +26,30 @@
       when: containment_action not in ['containment', 'resume']
         
   tasks:
+    # Generate inbound whitelist for AAP servers
+    - name: Generate inbound whitelist for AAP servers
+      set_fact:
+        default_inbound_whitelist: "{{ default_inbound_whitelist + [{'ip': item, 'port': 22, 'protocol': 'tcp'}] }}"
+      loop: "{{ aap_ips }}"
+    
+    # Generate outbound whitelist for DNS servers (TCP)
+    - name: Generate outbound whitelist for DNS servers (TCP)
+      set_fact:
+        default_outbound_whitelist: "{{ default_outbound_whitelist + [{'ip': item, 'port': 53, 'protocol': 'tcp'}] }}"
+      loop: "{{ dns_ips }}"
+    
+    # Generate outbound whitelist for DNS servers (UDP)
+    - name: Generate outbound whitelist for DNS servers (UDP)
+      set_fact:
+        default_outbound_whitelist: "{{ default_outbound_whitelist + [{'ip': item, 'port': 53, 'protocol': 'udp'}] }}"
+      loop: "{{ dns_ips }}"
+    
+    - name: Display generated whitelists
+      debug:
+        msg:
+          - "Inbound whitelist: {{ default_inbound_whitelist }}"
+          - "Outbound whitelist: {{ default_outbound_whitelist }}"
+
     - name: Run containment role
       include_role:
         name: containment

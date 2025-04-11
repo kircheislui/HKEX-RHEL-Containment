@@ -4,13 +4,23 @@
   connection: local
   gather_facts: no
   vars:
-    aap_ip: 192.168.1.38
-    dns_ip: 192.168.1.1
     tower_host: "{{ tower_host }}"
     tower_token: "{{ tower_token }}"
     rhel9_job_template_id: 7
     rhel8_job_template_id: 10
     rhel7_job_template_id: 11
+
+    # Multiple AAP server IPs
+    aap_ips:
+      - 192.168.131.100
+      - 192.168.1.138
+      - 192.168.131.102
+    
+    # Multiple DNS server IPs
+    dns_ips:
+      - 192.168.131.1
+      - 192.168.1.1
+
   tasks:
     - name: Get limit hosts from extra vars
       set_fact:
@@ -108,8 +118,8 @@
             outbound_whitelist: "{{ outbound_whitelist | default([]) }}"
             inbound_whitelist: "{{ inbound_whitelist | default([]) }}"
             verification_list: "{{ verification_list | default([]) }}"
-            aap_ip: "{{ aap_ip }}"
-            dns_ip: "{{ dns_ip }}"
+            aap_ips: "{{ aap_ips }}"
+            dns_ips: "{{ dns_ips }}"
         status_code: [200, 201, 202]
         validate_certs: no  # Set to 'yes' in production
       register: rhel9_job_response
@@ -131,8 +141,8 @@
             outbound_whitelist: "{{ outbound_whitelist | default([]) }}"
             inbound_whitelist: "{{ inbound_whitelist | default([]) }}"
             verification_list: "{{ verification_list | default([]) }}"
-            aap_ip: "{{ aap_ip }}"
-            dns_ip: "{{ dns_ip }}"
+            aap_ips: "{{ aap_ips }}"
+            dns_ips: "{{ dns_ips }}"
         status_code: [200, 201, 202]
         validate_certs: no  # Set to 'yes' in production
       register: rhel8_job_response
@@ -154,8 +164,8 @@
             outbound_whitelist: "{{ outbound_whitelist | default([]) }}"
             inbound_whitelist: "{{ inbound_whitelist | default([]) }}"
             verification_list: "{{ verification_list | default([]) }}"
-            aap_ip: "{{ aap_ip }}"
-            dns_ip: "{{ dns_ip }}"            
+            aap_ips: "{{ aap_ips }}"
+            dns_ips: "{{ dns_ips }}"            
         status_code: [200, 201, 202]
         validate_certs: no  # Set to 'yes' in production
       register: rhel7_job_response
