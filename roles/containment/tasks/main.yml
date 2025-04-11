@@ -1,4 +1,14 @@
 ---
+- name: Find available Python interpreter
+  command: which python3 python2 python
+  register: python_path
+  ignore_errors: true
+  changed_when: false
+
+- name: Set Python interpreter path
+  set_fact:
+    python_interpreter: "{{ python_path.stdout_lines[0] | default('/usr/bin/python') }}"
+
 - name: Include RHEL 7 containment tasks
   include_tasks: rhel7_containment.yml
   when: ansible_distribution_major_version == '7'

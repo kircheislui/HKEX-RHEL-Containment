@@ -13,26 +13,26 @@
 
     - name: Check if iptables backup exists
       stat:
-        path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/iptables.conf"
+        path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/iptables"
       register: backup_check
       failed_when: backup_check.stat.exists
 
     - name: Check if iptables config file exists
       stat:
-        path: "/etc/sysconfig/iptables.conf"
+        path: "/etc/sysconfig/iptables"
       register: iptables_config_check
 
     - name: Backup existing iptables configuration from file
       copy:
-        src: "/etc/sysconfig/iptables.conf"
-        dest: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/iptables.conf"
+        src: "/etc/sysconfig/iptables"
+        dest: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/iptables"
         remote_src: yes
       when: iptables_config_check.stat.exists
 
     - name: Generate iptables configuration
       template:
         src: "iptables/{{ profile | lower }}.j2"
-        dest: "/etc/sysconfig/iptables.conf"
+        dest: "/etc/sysconfig/iptables"
         mode: '0600'
 
     - name: Apply iptables rules
@@ -83,13 +83,13 @@
     - block:
         - name: Check if backup exists for restore
           stat:
-            path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/iptables.conf"
+            path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/iptables"
           register: restore_check
 
         - name: Restore iptables from backup
           copy:
-            src: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/iptables.conf"
-            dest: "/etc/sysconfig/iptables.conf"
+            src: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/iptables"
+            dest: "/etc/sysconfig/iptables"
             remote_src: yes
           when: restore_check.stat.exists
 
