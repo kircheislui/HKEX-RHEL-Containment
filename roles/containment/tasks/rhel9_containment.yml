@@ -126,18 +126,18 @@
           ansible.builtin.stat:
             path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables_service_status"
           register: status_file
-
-        - name: Read nftables service status if file exists
-          ansible.builtin.set_fact:
-            nftables_status: "{{ lookup('file', backup_path + '/' + profile + '-' + ansible_date_time.date + '/nftables_service_status') }}"
-          when: status_file.stat.exists
-          failed_when: false
-
+          
+        - name: Display status file path for debugging
+          ansible.builtin.debug:
+            msg: "Checking for status file at: {{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables_service_status"
+            
         - name: Restore nftables service active state
           ansible.builtin.service:
             name: "nftables"
             state: started
-          when: (nftables_status is defined) and (nftables_status == 'active')
+          when: 
+            - status_file.stat.exists
+            - lookup('file', status_file.stat.path) == 'active'
 
         - name: Remove backup directory after restore
           file:
