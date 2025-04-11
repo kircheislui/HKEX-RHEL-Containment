@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# port_verifier.sh - Simple port checking script without hardcoding
+# port_verifier.sh - Simple port checking script (more general approach)
 # Usage: ./port_verifier.sh '[{"ip":"192.168.0.18","port":22,"protocol":"tcp","expect":"success"}]'
 
 # Set safe error handling
@@ -85,21 +85,52 @@ check_udp_port() {
   fi
 }
 
-# Extract value from JSON object
-extract_value() {
+# Find all IP addresses in a string
+find_ips() {
+  local input="$1"
+  # Match IPv4 addresses
+  grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' <<< "$input" | sort -u
+}
+
+# Extract JSON value for key in an IP-specific context
+extract_ip_value() {
   local json="$1"
-  local key="$2"
+  local ip="$2"
+  local key="$3"
+  local default="$4"
   
-  # Extract value for the given key
-  local pattern="\"$key\"[[:space:]]*:[[:space:]]*"
+  # Find a section with this IP
+  local section
+  section=$(grep -o "{[^}]*\"ip\":\"$ip\"[^}]*}" <<< "$json" || echo "")
   
-  # Check if it's a string value (has quotes)
-  if echo "$json" | grep -q "\"$key\"[[:space:]]*:[[:space:]]*\""; then
-    # It's a string value with quotes
-    echo "$json" | sed -n 's/.*"'"$key"'"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'
+  if [[ -z "$section" ]]; then
+    section=$(grep -o "{[^}]*$ip[^}]*}" <<< "$json" || echo "")
+  fi
+  
+  if [[ -z "$section" ]]; then
+    echo "$default"
+    return
+  fi
+  
+  # Now extract the key from that section
+  if [[ "$key" == "port" ]]; then
+    # Port is numeric
+    local port
+    port=$(grep -o "\"port\":[0-9]*" <<< "$section" | grep -o "[0-9]*" || echo "")
+    if [[ -n "$port" ]]; then
+      echo "$port"
+    else
+      echo "$default"
+    fi
   else
-    # It's a numeric value without quotes
-    echo "$json" | sed -n 's/.*"'"$key"'"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p'
+    # Other keys are likely strings
+    local value
+    value=$(grep -o "\"$key\":\"[^\"]*\"" <<< "$section" | sed "s/\"$key\":\"//;s/\"$//" || echo "")
+    if [[ -n "$value" ]]; then
+      echo "$value"
+    else
+      echo "$default"
+    fi
   fi
 }
 
@@ -111,79 +142,37 @@ main() {
     exit 1
   fi
   
+  # Get raw input
+  raw_input="$1"
+  echo "Processing input... (length: ${#raw_input} bytes)" >&2
+  
   # Initialize results array and success tracker
   declare -a results=()
   all_success=true
   
-  # Get the JSON input
-  local input="$1"
+  # Extract all IPs from the input
+  ips=$(find_ips "$raw_input")
   
-  # Clean the input - strip unnecessary whitespace
-  input=$(echo "$input" | tr -d '\n\r')
-  
-  # Validate that we have a JSON array
-  if [[ ! "$input" =~ ^\[.*\]$ ]]; then
-    echo "Error: Input is not a valid JSON array" >&2
+  if [[ -z "$ips" ]]; then
+    echo "Warning: No IP addresses found in input" >&2
     exit 1
   fi
   
-  # Extract the items more reliably by using jq-like approach with sed
-  # Remove the outer brackets
-  content="${input#\[}"
-  content="${content%\]}"
-  
-  # Check if we have content
-  if [[ -z "$content" ]]; then
-    echo '{"results":[]}' 
-    exit 0
-  fi
-  
-  # Split the items using temporary delimiter
-  # Replace },{
-  content=$(echo "$content" | sed 's/},{/@@@/g')
-  
-  # Now we can split by our delimiter
-  IFS="@@@" read -ra items <<< "$content"
-  
-  # Process each item
-  for item in "${items[@]}"; do
-    # Clean up the item to ensure it has proper JSON format
-    item=$(echo "$item" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
-    
-    # Add braces if missing
-    if [[ ! "$item" =~ ^\{.*\}$ ]]; then
-      item="{$item}"
-    fi
-    
-    # Skip empty objects
-    if [[ "$item" == "{}" ]]; then
-      continue
-    fi
-    
-    # Extract the values using our helper function
-    ip=$(extract_value "$item" "ip")
-    port=$(extract_value "$item" "port")
-    protocol=$(extract_value "$item" "protocol")
-    expect=$(extract_value "$item" "expect")
-    
-    # Set defaults for optional fields
-    protocol="${protocol:-tcp}"
-    expect="${expect:-success}"
-    
-    # Skip items without required fields
+  # Process each IP found
+  while read -r ip; do
+    # Skip empty lines
     if [[ -z "$ip" ]]; then
-      echo "Warning: Missing IP address in item. Skipping." >&2
       continue
     fi
     
-    if [[ -z "$port" ]]; then
-      echo "Warning: Missing port in item. Skipping." >&2
-      continue
-    fi
+    # Try to extract values for this IP
+    port=$(extract_ip_value "$raw_input" "$ip" "port" "22")  # Default to port 22 if not specified
+    protocol=$(extract_ip_value "$raw_input" "$ip" "protocol" "tcp")  # Default to tcp if not specified
+    expected=$(extract_ip_value "$raw_input" "$ip" "expect" "success")  # Default to success if not specified
     
-    # Perform the check
-    echo "Checking $protocol://$ip:$port..." >&2
+    echo "Found test case: $protocol://$ip:$port (expect: $expected)" >&2
     
+    # Perform the test
     if [[ "$protocol" == "tcp" ]]; then
       if check_tcp_port "$ip" "$port"; then
         actual="success"
@@ -197,58 +186,45 @@ main() {
         actual="failure"
       fi
     else
-      # Unsupported protocol
-      echo "Error: Unsupported protocol $protocol" >&2
+      echo "Unsupported protocol: $protocol" >&2
       actual="error"
     fi
     
     # Check if result matches expectation
-    if [[ "$actual" == "$expect" ]]; then
-      success="true"
+    if [[ "$actual" == "$expected" ]]; then
+      success=true
     else
-      success="false"
+      success=false
       all_success=false
     fi
     
-    # Create JSON object for this result
-    result='{'
-    result+='"ip":"'"$ip"'",'
-    result+='"port":'"$port"','
-    result+='"protocol":"'"$protocol"'",'
-    result+='"expected":"'"$expect"'",'
-    result+='"actual":"'"$actual"'",'
-    result+='"success":'"$success"
-    result+='}'
-    
-    # Add to results array
+    # Create result object
+    result="{\"ip\":\"$ip\",\"port\":$port,\"protocol\":\"$protocol\",\"expected\":\"$expected\",\"actual\":\"$actual\",\"success\":$success}"
     results+=("$result")
     
-    echo "Result: $actual (Expected: $expect)" >&2
-  done
+    echo "Result: $actual (Expected: $expected)" >&2
+    
+  done <<< "$ips"
   
-  # Combine results into final JSON
-  final_json='{"results":['
-  
-  # If no valid results, return empty array
+  # Check if we processed any items
   if [ ${#results[@]} -eq 0 ]; then
-    echo '{"results":[]}' 
+    echo "Error: No valid verification items found in input" >&2
     exit 1
   fi
   
-  # Add results to JSON with commas
+  # Create final JSON
+  final_json='{"results":['
   for i in "${!results[@]}"; do
     if [ $i -gt 0 ]; then
-      final_json+=','
+      final_json+=","
     fi
     final_json+="${results[$i]}"
   done
-  
   final_json+=']}'
   
-  # Output final JSON
   echo "$final_json"
   
-  # Return exit code
+  # Return appropriate exit code
   if [ "$all_success" = true ]; then
     exit 0
   else
@@ -256,5 +232,5 @@ main() {
   fi
 }
 
-# Run main function
+# Run the main function with all arguments
 main "$@"
