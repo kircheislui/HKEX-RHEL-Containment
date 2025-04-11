@@ -14,7 +14,7 @@
 - name: Save nftables service status to file
   ansible.builtin.copy:
     content: "{{ nftables_status }}"
-    dest: "{{ backup_dir }}/nftables_service_status"
+    dest: "{{ backup_path }}/nftables_service_status"
     mode: '0644'
 
 # Wrap the entire playbook in a block/rescue structure
