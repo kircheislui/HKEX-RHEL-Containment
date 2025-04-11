@@ -84,6 +84,17 @@ check_udp_port() {
   fi
 }
 
+# Check if string is a valid JSON object
+is_valid_json_object() {
+  local obj="$1"
+  # Check if it has curly braces and at least one key-value pair
+  if [[ "$obj" =~ ^\{.*:.*\}$ ]]; then
+    return 0  # Valid
+  else
+    return 1  # Invalid
+  fi
+}
+
 # Main function
 main() {
   # Check for required argument
@@ -96,11 +107,11 @@ main() {
   declare -a results=()
   all_success=true
   
-  # Simple manual parsing of JSON array
+  # Get JSON input
   json_input="$1"
   
-  # Clean the input - strip spaces/newlines
-  json_input=$(echo "$json_input" | tr -d '\n\r' | sed 's/ //g')
+  # Clean the input - strip unnecessary whitespace
+  json_input=$(echo "$json_input" | tr -d '\n\r' | sed 's/[[:space:]]\+/ /g')
   
   # Validate that we have a JSON array
   if [[ ! "$json_input" =~ ^\[.*\]$ ]]; then
@@ -108,53 +119,70 @@ main() {
     exit 1
   fi
   
-  # Remove outer brackets
+  # Extract the actual list items more reliably
+  # First, remove the enclosing square brackets
   json_input="${json_input#\[}"
   json_input="${json_input%\]}"
   
-  # Handle empty array
+  # If no items, exit early
   if [[ -z "$json_input" ]]; then
     echo '{"results":[]}' 
     exit 0
   fi
   
-  # Split JSON objects by commas that are not within quotes
-  # This uses a temporary delimiter to split objects
-  temp_delim="SPLIT_HERE"
-  
-  # Replace object delimiter with temporary delimiter
-  # This replacement handles only commas between objects
-  parsed_input=$(echo "$json_input" | sed 's/},{/}'"$temp_delim"'{/g')
-  
-  # Now split by our temporary delimiter
-  IFS="$temp_delim" read -ra objects <<< "$parsed_input"
-  
-  # Process each object
-  for obj in "${objects[@]}"; do
-    # Ensure we have complete JSON object with curly braces
-    if [[ ! "$obj" =~ ^\{.*\}$ ]]; then
-      obj="{$obj}"
+  # Handle verification_list directly
+  # This improved approach extracts JSON objects more reliably
+  # Match all complete objects with balanced braces
+  while [[ "$json_input" =~ \{([^{}]|\{[^{}]*\})*\} ]]; do
+    # Extract the matched object
+    obj="${BASH_REMATCH[0]}"
+    
+    # Skip empty or invalid objects
+    if ! is_valid_json_object "$obj"; then
+      # Remove this object from the input and continue
+      json_input="${json_input/${BASH_REMATCH[0]}/}"
+      continue
     fi
     
-    # Extract values safely using grep and sed
-    ip=$(echo "$obj" | grep -o '"ip":"[^"]*"' | sed 's/"ip":"//;s/"$//')
-    port=$(echo "$obj" | grep -o '"port":[0-9]*' | sed 's/"port"://')
-    protocol=$(echo "$obj" | grep -o '"protocol":"[^"]*"' | sed 's/"protocol":"//;s/"$//')
-    expect=$(echo "$obj" | grep -o '"expect":"[^"]*"' | sed 's/"expect":"//;s/"$//')
+    # Extract values more reliably
+    ip=""
+    port=""
+    protocol="tcp"  # Default
+    expect="success"  # Default
     
-    # Set defaults for missing values
-    protocol="${protocol:-tcp}"
-    expect="${expect:-success}"
+    # Extract IP
+    if [[ "$obj" =~ \"ip\"[[:space:]]*:[[:space:]]*\"([^\"]*)\" ]]; then
+      ip="${BASH_REMATCH[1]}"
+    fi
     
-    # Validate ip and port
+    # Extract port
+    if [[ "$obj" =~ \"port\"[[:space:]]*:[[:space:]]*([0-9]+) ]]; then
+      port="${BASH_REMATCH[1]}"
+    fi
+    
+    # Extract protocol
+    if [[ "$obj" =~ \"protocol\"[[:space:]]*:[[:space:]]*\"([^\"]*)\" ]]; then
+      protocol="${BASH_REMATCH[1]}"
+    fi
+    
+    # Extract expect
+    if [[ "$obj" =~ \"expect\"[[:space:]]*:[[:space:]]*\"([^\"]*)\" ]]; then
+      expect="${BASH_REMATCH[1]}"
+    fi
+    
+    # Validate required fields
     if [[ -z "$ip" ]]; then
-      echo "Warning: Empty IP address in input object: $obj" >&2
-      ip="missing_ip"
+      echo "Warning: Missing IP address in object. Skipping." >&2
+      # Remove this object from the input and continue
+      json_input="${json_input/${BASH_REMATCH[0]}/}"
+      continue
     fi
     
     if [[ -z "$port" ]]; then
-      echo "Warning: Empty port in input object: $obj" >&2
-      port="0"
+      echo "Warning: Missing port in object. Skipping." >&2
+      # Remove this object from the input and continue
+      json_input="${json_input/${BASH_REMATCH[0]}/}"
+      continue
     fi
     
     # Check connectivity
@@ -200,7 +228,26 @@ main() {
     results+=("$result")
     
     echo "Result: $actual (Expected: $expect)" >&2
+    
+    # Remove this object from the input and continue
+    json_input="${json_input/${BASH_REMATCH[0]}/}"
+    
+    # Remove leading comma if present
+    json_input="${json_input#,}"
+    # Remove trailing comma if present
+    json_input="${json_input%,}"
+    # Remove leading whitespace
+    json_input="${json_input#"${json_input%%[![:space:]]*}"}"
+    # Remove trailing whitespace
+    json_input="${json_input%"${json_input##*[![:space:]]}"}"
   done
+  
+  # If no valid objects were processed, print warning
+  if [ ${#results[@]} -eq 0 ]; then
+    echo "Warning: No valid objects found in input JSON" >&2
+    echo '{"results":[]}' 
+    exit 1
+  fi
   
   # Combine results into final JSON
   final_json='{"results":['
