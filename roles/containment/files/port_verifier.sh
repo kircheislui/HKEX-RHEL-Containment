@@ -1,170 +1,227 @@
 #!/bin/bash
 
-# Simple port verifier with improved timeout
-# Usage: ./port_verifier.sh '[{"ip":"192.168.1.1","port":22,"protocol":"tcp","expect":"success"},...]'
+# port_verifier.sh - Simple port checking script
+# Usage: ./port_verifier.sh '[{"ip":"192.168.0.18","port":22,"protocol":"tcp","expect":"success"}]'
 
-# Function to check if a TCP port is open with timeout
+# Set strict error handling
+set -o nounset
+
+# Function to check if a TCP port is open
 check_tcp_port() {
-  local ip=$1
-  local port=$2
-  local max_time=5  # 5 second timeout
+  local ip="$1"
+  local port="$2"
+  local timeout=5
+  
+  # Validate input
+  if [[ -z "$ip" ]] || [[ -z "$port" ]]; then
+    echo "Invalid input: IP or port is empty" >&2
+    return 1
+  fi
+  
+  echo "Checking TCP connection to $ip:$port..." >&2
   
   # Use timeout command if available
   if command -v timeout >/dev/null 2>&1; then
-    if timeout $max_time bash -c "echo > /dev/tcp/$ip/$port" >/dev/null 2>&1; then
-      return 0  # Open
+    if timeout $timeout bash -c "echo > /dev/tcp/$ip/$port" >/dev/null 2>&1; then
+      return 0  # Success
     else
-      return 1  # Closed or timeout
+      return 1  # Failure
     fi
   else
-    # Set a timer to kill process after timeout
-    (sleep $max_time; kill $$) 2>/dev/null & 
-    timer_pid=$!
-    
-    # Try the connection
+    # Fallback if timeout is not available
     if (echo > /dev/tcp/$ip/$port) >/dev/null 2>&1; then
-      kill $timer_pid 2>/dev/null
-      return 0  # Open
+      return 0  # Success
     else
-      kill $timer_pid 2>/dev/null
-      return 1  # Closed
+      return 1  # Failure
     fi
   fi
 }
 
-# Function to check if a UDP port is responding with timeout
+# Function to check UDP port
 check_udp_port() {
-  local ip=$1
-  local port=$2
-  local max_time=5  # 5 second timeout
+  local ip="$1"
+  local port="$2"
+  local timeout=5
+  
+  # Validate input
+  if [[ -z "$ip" ]] || [[ -z "$port" ]]; then
+    echo "Invalid input: IP or port is empty" >&2
+    return 1
+  fi
+  
+  echo "Checking UDP connection to $ip:$port..." >&2
   
   # Try nc if available
   if command -v nc >/dev/null 2>&1; then
     if command -v timeout >/dev/null 2>&1; then
-      if timeout $max_time nc -zu -w $max_time $ip $port >/dev/null 2>&1; then
-        return 0  # Open
+      if timeout $timeout nc -zu -w $timeout $ip $port >/dev/null 2>&1; then
+        return 0  # Success
       else
-        return 1  # Closed or timeout
+        return 1  # Failure
       fi
     else
-      if nc -zu -w $max_time $ip $port >/dev/null 2>&1; then
-        return 0  # Open
+      if nc -zu -w $timeout $ip $port >/dev/null 2>&1; then
+        return 0  # Success
       else
-        return 1  # Closed
+        return 1  # Failure
       fi
-    fi
-  fi
-  
-  # Fallback to /dev/udp
-  if command -v timeout >/dev/null 2>&1; then
-    if timeout $max_time bash -c "echo > /dev/udp/$ip/$port" >/dev/null 2>&1; then
-      return 0  # Open
-    else
-      return 1  # Closed or timeout
     fi
   else
-    # Set a timer to kill process after timeout
-    (sleep $max_time; kill $$) 2>/dev/null & 
-    timer_pid=$!
-    
-    # Try the connection
-    if (echo > /dev/udp/$ip/$port) >/dev/null 2>&1; then
-      kill $timer_pid 2>/dev/null
-      return 0  # Open
+    # Fallback to dev/udp
+    if command -v timeout >/dev/null 2>&1; then
+      if timeout $timeout bash -c "echo > /dev/udp/$ip/$port" >/dev/null 2>&1; then
+        return 0  # Success
+      else
+        return 1  # Failure
+      fi
     else
-      kill $timer_pid 2>/dev/null
-      return 1  # Closed
+      if (echo > /dev/udp/$ip/$port) >/dev/null 2>&1; then
+        return 0  # Success
+      else
+        return 1  # Failure
+      fi
     fi
   fi
 }
 
-# Main execution
-if [ $# -ne 1 ]; then
-  echo "Usage: $0 'JSON_DATA'"
-  exit 1
-fi
-
-# Extract entries from the JSON string
-input="$1"
-input="${input#[}" # Remove leading [
-input="${input%]}" # Remove trailing ]
-
-IFS='},{'
-entries=($input)
-
-success_all=true
-results="{"
-results+='"results":['
-
-for i in "${!entries[@]}"; do
-  entry="${entries[$i]}"
-  entry="${entry#'{'}"  # Remove leading {
-  entry="${entry%'}'}"  # Remove trailing }
+# Main function
+main() {
+  # Check for required argument
+  if [ $# -ne 1 ]; then
+    echo "Usage: $0 'JSON_DATA'" >&2
+    exit 1
+  fi
   
-  # Extract values
-  ip=$(echo "$entry" | grep -o '"ip"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d '"' -f 4)
-  port=$(echo "$entry" | grep -o '"port"[[:space:]]*:[[:space:]]*[0-9]*' | grep -o '[0-9]*')
-  protocol=$(echo "$entry" | grep -o '"protocol"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d '"' -f 4)
-  expect=$(echo "$entry" | grep -o '"expect"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d '"' -f 4)
+  # Initialize results array
+  declare -a results=()
+  all_success=true
   
-  # Set defaults
-  protocol=${protocol:-tcp}
-  expect=${expect:-success}
+  # Simple manual parsing of JSON array
+  json_input="$1"
   
-  echo "Checking $protocol://$ip:$port..." >&2
+  # Clean the input - strip spaces/newlines
+  json_input=$(echo "$json_input" | tr -d '\n\r' | sed 's/ //g')
   
-  # Perform the check with timeout
-  if [ "$protocol" = "tcp" ]; then
-    if check_tcp_port "$ip" "$port"; then
-      actual="success"
-    else
-      actual="failure"
+  # Validate that we have a JSON array
+  if [[ ! "$json_input" =~ ^\[.*\]$ ]]; then
+    echo "Error: Input is not a valid JSON array" >&2
+    exit 1
+  fi
+  
+  # Remove outer brackets
+  json_input="${json_input#\[}"
+  json_input="${json_input%\]}"
+  
+  # Handle empty array
+  if [[ -z "$json_input" ]]; then
+    echo '{"results":[]}' 
+    exit 0
+  fi
+  
+  # Split JSON objects by commas that are not within quotes
+  # This uses a temporary delimiter to split objects
+  temp_delim="SPLIT_HERE"
+  
+  # Replace object delimiter with temporary delimiter
+  # This replacement handles only commas between objects
+  parsed_input=$(echo "$json_input" | sed 's/},{/}'"$temp_delim"'{/g')
+  
+  # Now split by our temporary delimiter
+  IFS="$temp_delim" read -ra objects <<< "$parsed_input"
+  
+  # Process each object
+  for obj in "${objects[@]}"; do
+    # Ensure we have complete JSON object with curly braces
+    if [[ ! "$obj" =~ ^\{.*\}$ ]]; then
+      obj="{$obj}"
     fi
-  elif [ "$protocol" = "udp" ]; then
-    if check_udp_port "$ip" "$port"; then
-      actual="success"
-    else
-      actual="failure"
+    
+    # Extract values safely using grep and sed
+    ip=$(echo "$obj" | grep -o '"ip":"[^"]*"' | sed 's/"ip":"//;s/"$//')
+    port=$(echo "$obj" | grep -o '"port":[0-9]*' | sed 's/"port"://')
+    protocol=$(echo "$obj" | grep -o '"protocol":"[^"]*"' | sed 's/"protocol":"//;s/"$//')
+    expect=$(echo "$obj" | grep -o '"expect":"[^"]*"' | sed 's/"expect":"//;s/"$//')
+    
+    # Set defaults for missing values
+    protocol="${protocol:-tcp}"
+    expect="${expect:-success}"
+    
+    # Validate ip and port
+    if [[ -z "$ip" ]]; then
+      echo "Warning: Empty IP address in input object: $obj" >&2
+      ip="missing_ip"
     fi
+    
+    if [[ -z "$port" ]]; then
+      echo "Warning: Empty port in input object: $obj" >&2
+      port="0"
+    fi
+    
+    # Check connectivity
+    echo "Checking $protocol://$ip:$port..." >&2
+    
+    # Perform test based on protocol
+    if [[ "$protocol" == "tcp" ]]; then
+      if check_tcp_port "$ip" "$port"; then
+        actual="success"
+      else
+        actual="failure"
+      fi
+    elif [[ "$protocol" == "udp" ]]; then
+      if check_udp_port "$ip" "$port"; then
+        actual="success"
+      else
+        actual="failure"
+      fi
+    else
+      # Unsupported protocol
+      actual="error"
+    fi
+    
+    # Check if result matches expectation
+    if [[ "$actual" == "$expect" ]]; then
+      success="true"
+    else
+      success="false"
+      all_success=false
+    fi
+    
+    # Create JSON object for this result
+    result='{'
+    result+='"ip":"'"$ip"'",'
+    result+='"port":'"$port"','
+    result+='"protocol":"'"$protocol"'",'
+    result+='"expected":"'"$expect"'",'
+    result+='"actual":"'"$actual"'",'
+    result+='"success":'"$success"
+    result+='}'
+    
+    # Add to results array
+    results+=("$result")
+    
+    echo "Result: $actual (Expected: $expect)" >&2
+  done
+  
+  # Combine results into final JSON
+  final_json='{"results":['
+  for i in "${!results[@]}"; do
+    if [ $i -gt 0 ]; then
+      final_json+=','
+    fi
+    final_json+="${results[$i]}"
+  done
+  final_json+=']}'
+  
+  # Output final JSON
+  echo "$final_json"
+  
+  # Return exit code
+  if [ "$all_success" = true ]; then
+    exit 0
   else
-    actual="error"
+    exit 1
   fi
-  
-  # Check if it matches expectation
-  if [ "$actual" = "$expect" ]; then
-    success="true"
-  else
-    success="false"
-    success_all=false
-  fi
-  
-  # Add comma for all but the first entry
-  if [ $i -gt 0 ]; then
-    results+=","
-  fi
-  
-  # Add this result to the JSON output
-  results+='{'
-  results+='"ip":"'"$ip"'",'
-  results+='"port":'"$port"','
-  results+='"protocol":"'"$protocol"'",'
-  results+='"expected":"'"$expect"'",'
-  results+='"actual":"'"$actual"'",'
-  results+='"success":'"$success"
-  results+='}'
-  
-  echo "Result: $actual (Expected: $expect)" >&2
-done
+}
 
-# Close the JSON
-results+=']}'
-
-# Output the results
-echo "$results"
-
-# Exit with error if any test failed
-if [ "$success_all" = false ]; then
-  exit 1
-fi
-
-exit 0
+# Run main function
+main "$@"
