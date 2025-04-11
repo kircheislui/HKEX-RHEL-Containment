@@ -4,6 +4,19 @@
   set_fact:
     containment_success: true
 
+- name: Gather service facts
+  ansible.builtin.service_facts:
+
+- name: Get status of nftables service
+  ansible.builtin.set_fact:
+    nftables_status: "{{ ansible_facts.services['nftables.service'].state if ansible_facts.services['nftables.service'] is defined else 'unknown' }}"
+
+- name: Save nftables service status to file
+  ansible.builtin.copy:
+    content: "{{ nftables_status }}"
+    dest: "{{ backup_dir }}/nftables_service_status"
+    mode: '0644'
+
 # Wrap the entire playbook in a block/rescue structure
 - block:
     - name: Create backup directory
@@ -78,61 +91,63 @@
           when: verification_list | length > 0 and verification_results is defined
       when: not (nftables_result is defined and nftables_result.failed)
 
-#  # This rescue block will be triggered by ANY failure in the main block
-#  rescue:
-#    - name: Set failure 
-#      set_fact:
-#        containment_success: false
+  # This rescue block will be triggered by ANY failure in the main block
+  rescue:
+    - name: Set failure 
+      set_fact:
+        containment_success: false
 
-#    - name: Display failure message
-#      debug:
-#        msg: "Containment failed"
+    - name: Display failure message
+      debug:
+        msg: "Containment failed"
 
-#    # Only perform restore if we have a backup to restore from
-#    - block:
-#        - name: Check if backup exists for restore
-#          stat:
-#            path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables.conf"
-#          register: restore_check
+    # Only perform restore if we have a backup to restore from
+    - block:
+        - name: Check if backup exists for restore
+          stat:
+            path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables.conf"
+          register: restore_check
 
-#        - name: Restore nftables from backup
-#          copy:
-#            src: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables.conf"
-#            dest: "/etc/sysconfig/nftables.conf"
-#            remote_src: yes
-#          when: restore_check.stat.exists
+        - name: Restore nftables from backup
+          copy:
+            src: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables.conf"
+            dest: "/etc/sysconfig/nftables.conf"
+            remote_src: yes
+          when: restore_check.stat.exists
 
-#        - name: Restart nftables after restore
-#          service:
-#            name: nftables
-#            state: restarted
-#          when: restore_check.stat.exists
+        - name: Restart nftables after restore
+          service:
+            name: nftables
+            state: restarted
+          when: 
+          - restore_check.stat.exists
+          - lookup('file', '{{ backup_dir }}/{{ profile }}-{{ ansible_date_time.date }}/nftables_service_status', errors='ignore') == 'running'
 
-#        - name: Remove backup directory after restore
-#          file:
-#            path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}"
-#            state: absent
-#          when: restore_check.stat.exists
+        - name: Remove backup directory after restore
+          file:
+            path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}"
+            state: absent
+          when: restore_check.stat.exists
 
-#        - name: Notification after restore
-#          debug:
-#            msg: "Original configuration has been restored. Please verify manually that connectivity is working correctly."
-#          when: restore_check.stat.exists
-#            
-#        - name: Notification when no backup to restore
-#          debug:
-#            msg: "No backup was created yet, so no restoration was performed."
-#          when: not restore_check.stat.exists
-#      rescue:
-#        - name: Report restore failure
-#          debug:
-#            msg: "WARNING: Failed to restore original configuration. Manual intervention may be required!"
+        - name: Notification after restore
+          debug:
+            msg: "Original configuration has been restored. Please verify manually that connectivity is working correctly."
+          when: restore_check.stat.exists
+            
+        - name: Notification when no backup to restore
+          debug:
+            msg: "No backup was created yet, so no restoration was performed."
+          when: not restore_check.stat.exists
+      rescue:
+        - name: Report restore failure
+          debug:
+            msg: "WARNING: Failed to restore original configuration. Manual intervention may be required!"
 
-#  # Always runs, regardless of success or failure
-#  always:
-#    - name: Final status
-#      debug:
-#        msg: "{{ 'Containment process completed SUCCESSFULLY' if containment_success else 'Containment process FAILED' }}"
+  # Always runs, regardless of success or failure
+  always:
+    - name: Final status
+      debug:
+        msg: "{{ 'Containment process completed SUCCESSFULLY' if containment_success else 'Containment process FAILED' }}"
 
 # Final task to explicitly fail the play if containment wasn't successful
 - name: Fail if containment was not successful
