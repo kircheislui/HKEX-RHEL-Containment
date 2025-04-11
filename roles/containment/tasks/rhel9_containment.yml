@@ -121,7 +121,7 @@
             state: restarted
           when: 
           - restore_check.stat.exists
-          - lookup('file', '{{ backup_dir }}/{{ profile }}-{{ ansible_date_time.date }}/nftables_service_status', errors='ignore') == 'running'
+          - lookup('file', '{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables_service_status', errors='ignore') == 'running'
 
         - name: Remove backup directory after restore
           file:
