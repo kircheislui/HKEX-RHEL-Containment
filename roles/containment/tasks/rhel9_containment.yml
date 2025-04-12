@@ -55,7 +55,7 @@
     - name: Apply nftables rules asynchronously
       service:
         name: nftables
-        state: restarted
+        state: reloaded
       async: 60
       poll: 0
       register: nftables_restarting
@@ -125,10 +125,24 @@
             remote_src: yes
           when: restore_check.stat.exists
 
-        - name: Reload nftables service only if it was active before
-          ansible.builtin.service:
+        - name: Apply nftables rules asynchronously
+          service:
             name: nftables
             state: reloaded
+          async: 60
+          poll: 0
+          register: nftables_restarting_restore
+          when: 
+            - nftables_saved_state is defined 
+            - nftables_saved_state.content is defined
+            - (nftables_saved_state.content | b64decode | trim) == 'active'
+
+        - name: check restart nftables status
+          async_status:
+            jid: "{{ nftables_restarting_restore.ansible_job_id }}"
+          register: nftables_restore_result
+          until: nftables_restore_result.finished
+          retries: 30
           when: 
             - nftables_saved_state is defined 
             - nftables_saved_state.content is defined
