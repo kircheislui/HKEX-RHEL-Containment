@@ -4,8 +4,6 @@
   set_fact:
     containment_success: true
 
-
-
 # Wrap the entire playbook in a block/rescue structure
 - block:
     - name: Create backup directory
@@ -31,22 +29,16 @@
         remote_src: yes
       when: nftables_config_check.stat.exists
 
-    - name: Get nftables service active status
+    - name: Get nftables service state directly
       ansible.builtin.command: systemctl is-active nftables.service
-      register: nftables_active_result
+      register: nftables_state
       changed_when: false
       failed_when: false
 
-    - name: Get nftables service active status
-      ansible.builtin.command: systemctl is-active nftables.service
-      register: nftables_active_result
-      changed_when: false
-      failed_when: false
-
-    - name: Save nftables service status to file (plain text)
+    - name: Save nftables service state to file
       ansible.builtin.copy:
-        content: "{{ nftables_active_result.stdout }}"
-        dest: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables_service_status"
+        content: "{{ nftables_state.stdout }}"
+        dest: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables_service_state"
         mode: '0644'
 
     - name: Backup current nftables ruleset if no config file exists
@@ -115,29 +107,27 @@
             path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables.conf"
           register: restore_check
 
-        - name: Restore nftables from backup
-          copy:
+        - name: Read saved nftables service state
+          ansible.builtin.slurp:
+            src: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables_service_state"
+          register: nftables_saved_state
+          failed_when: false
+
+        - name: Restore nftables configuration
+          ansible.builtin.copy:
             src: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables.conf"
             dest: "/etc/sysconfig/nftables.conf"
             remote_src: yes
           when: restore_check.stat.exists
 
-        - name: Check if nftables status file exists
-          ansible.builtin.stat:
-            path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables_service_status"
-          register: status_file
-          
-        - name: Display status file path for debugging
-          ansible.builtin.debug:
-            msg: "Checking for status file at: {{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables_service_status"
-            
-        - name: Restore nftables service active state
+        - name: Restart nftables service only if it was active before
           ansible.builtin.service:
-            name: "nftables"
-            state: started
+            name: nftables
+            state: restarted
           when: 
-            - status_file.stat.exists
-            - lookup('file', status_file.stat.path) == 'active'
+            - nftables_saved_state is defined 
+            - nftables_saved_state.content is defined
+            - (nftables_saved_state.content | b64decode | trim) == 'active'
 
         - name: Remove backup directory after restore
           file:
