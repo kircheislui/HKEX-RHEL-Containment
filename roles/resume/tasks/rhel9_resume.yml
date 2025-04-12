@@ -25,6 +25,25 @@
     remote_src: yes
   when: backup_files.matched > 0
 
+- name: Get current nftables service state
+  ansible.builtin.command: systemctl is-active nftables.service
+  register: nftables_current_state
+  changed_when: false
+  failed_when: false
+
+# If the service was initially inactive but is now active, stop it
+- name: Stop nftables service if it was initially inactive
+  ansible.builtin.service:
+    name: nftables
+    state: stopped
+  when: 
+    - nftables_saved_state is defined 
+    - nftables_saved_state.content is defined
+    - (nftables_saved_state.content | b64decode | trim) == 'inactive' or (nftables_saved_state.content | b64decode | trim) == 'unknown'
+    - nftables_current_state.stdout == 'active'
+
+
+
 - name: Apply restored nftables rules
   service:
     name: nftables
@@ -32,7 +51,11 @@
   async: 60
   poll: 0
   register: nftables_result
-  when: backup_files.matched > 0
+  when:
+    - backup_files.matched > 0
+    - nftables_saved_state is defined 
+    - nftables_saved_state.content is defined
+    - (nftables_saved_state.content | b64decode | trim) == 'active'
 
 - name: check restart nftables status
   async_status:
@@ -40,7 +63,11 @@
   register: nftables_restore_result
   until: nftables_restore_result.finished
   retries: 30
-  when: backup_files.matched > 0
+  when:
+    - backup_files.matched > 0
+    - nftables_saved_state is defined 
+    - nftables_saved_state.content is defined
+    - (nftables_saved_state.content | b64decode | trim) == 'active'
 
 - name: Remove backup after successful resume
   file:
