@@ -11,16 +11,16 @@
         path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}"
         state: directory
 
+    - name: Check if nftables config file exists
+      stat:
+        path: "/etc/sysconfig/nftables.conf"
+      register: nftables_config_check
+
     - name: Check if nftables backup exists
       stat:
         path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables.conf"
       register: backup_check
       failed_when: backup_check.stat.exists
-
-    - name: Check if nftables config file exists
-      stat:
-        path: "/etc/sysconfig/nftables.conf"
-      register: nftables_config_check
 
     - name: Backup existing nftables configuration from file
       copy:
