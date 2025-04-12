@@ -51,7 +51,6 @@
         src: "nftables/{{ profile | lower }}.j2"
         dest: "/etc/sysconfig/nftables.conf"
         mode: '0600'
-      notify: restart nftables
 
     - name: Apply nftables rules asynchronously
       service:
