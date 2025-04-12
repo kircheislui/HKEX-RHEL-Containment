@@ -51,17 +51,22 @@
         src: "nftables/{{ profile | lower }}.j2"
         dest: "/etc/sysconfig/nftables.conf"
         mode: '0600'
+      notify: restart nftables
 
-    - name: Apply nftables rules
+    - name: Apply nftables rules asynchronously
       service:
         name: nftables
-        state: reloaded
-      register: nftables_result
+        state: restarted
+      async: 60
+      poll: 0
+      register: nftables_restarting
 
-    - name: Verify nftables ruleset
-      shell: nft list ruleset
-      register: nftables_verify
-      changed_when: false
+    - name: check restart nftables status
+      async_status:
+        jid: "{{ nftables_restarting.ansible_job_id }}"
+      register: nftables_result
+      until: nftables_result.finished
+      retries: 30
 
     # Only proceed with verification if nftables was successfully applied
     - block:
