@@ -138,7 +138,7 @@
 
         - name: Notification after restore
           debug:
-            msg: "Original configuration has been restored. Please verify manually that connectivity is working correctly."
+            msg: "Original configuration has been restored."
           when: restore_check.stat.exists
             
         - name: Notification when no backup to restore
