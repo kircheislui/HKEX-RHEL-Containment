@@ -75,4 +75,3 @@
     state: absent
   when: 
   - backup_files.matched > 0
-  - not nftables_result.failed
