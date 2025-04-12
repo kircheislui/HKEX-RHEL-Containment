@@ -46,4 +46,6 @@
   file:
     path: "{{ latest_backup }}"
     state: absent
-  when: not nftables_result.failed and backup_files.matched > 0
+  when: 
+  - backup_files.matched > 0
+  - not nftables_result.failed
