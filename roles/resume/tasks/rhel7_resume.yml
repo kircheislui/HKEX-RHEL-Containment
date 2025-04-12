@@ -6,6 +6,13 @@
     file_type: directory
   register: backup_files
 
+- name: Read saved iptables service state
+  ansible.builtin.slurp:
+    src: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/iptables_service_state"
+  register: iptables_saved_state
+  failed_when: false
+  when: backup_files.matched > 0
+
 - name: Set latest backup path
   set_fact:
     latest_backup: "{{ (backup_files.files | sort(attribute='mtime', reverse=True) | first).path }}"
@@ -18,20 +25,50 @@
     remote_src: yes
   when: backup_files.matched > 0
 
+- name: Get current iptables service state
+  ansible.builtin.command: systemctl is-active iptables.service
+  register: iptables_current_state
+  changed_when: false
+  failed_when: false
+
+# If the service was initially inactive but is now active, stop it
+- name: Stop iptables service if it was initially inactive
+  ansible.builtin.service:
+    name: iptables
+    state: stopped
+  when: 
+    - iptables_saved_state is defined 
+    - iptables_saved_state.content is defined
+    - (iptables_saved_state.content | b64decode | trim) == 'inactive' or (iptables_saved_state.content | b64decode | trim) == 'unknown'
+    - iptables_current_state.stdout == 'active'
+
 - name: Apply restored iptables rules
   service:
     name: iptables
-    state: restarted
+    state: reloaded
+  async: 60
+  poll: 0
   register: iptables_result
-  when: backup_files.matched > 0
+  when:
+    - backup_files.matched > 0
+    - iptables_saved_state is defined 
+    - iptables_saved_state.content is defined
+    - (iptables_saved_state.content | b64decode | trim) == 'active'
 
-- name: Verify iptables application
-  shell: iptables -L -n
-  when: backup_files.matched > 0
-  changed_when: false
+- name: check restart iptables status
+  async_status:
+    jid: "{{ iptables_result.ansible_job_id }}"
+  register: iptables_restore_result
+  until: iptables_restore_result.finished
+  retries: 30
+  when:
+    - backup_files.matched > 0
+    - iptables_saved_state is defined 
+    - iptables_saved_state.content is defined
+    - (iptables_saved_state.content | b64decode | trim) == 'active'
 
 - name: Remove backup after successful resume
   file:
     path: "{{ latest_backup }}"
     state: absent
-  when: not iptables_result.failed and backup_files.matched > 0
+  when: backup_files.matched > 0

@@ -11,16 +11,29 @@
         path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}"
         state: directory
 
-    - name: Check if iptables backup exists
-      stat:
-        path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/iptables"
-      register: backup_check
-      failed_when: backup_check.stat.exists
+    - name: Get iptables service state directly
+      ansible.builtin.command: systemctl is-active iptables.service
+      register: iptables_state
+      changed_when: false
+      failed_when: false
+
+    - name: Save iptables service state to file
+      ansible.builtin.copy:
+        content: "{{ iptables_state.stdout }}"
+        dest: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/iptables_service_state"
+        mode: '0644'
+        force: true
 
     - name: Check if iptables config file exists
       stat:
         path: "/etc/sysconfig/iptables"
       register: iptables_config_check
+
+    - name: Check if iptables backup exists
+      stat:
+        path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/iptables"
+      register: backup_check
+      failed_when: backup_check.stat.exists
 
     - name: Backup existing iptables configuration from file
       copy:
@@ -35,11 +48,20 @@
         dest: "/etc/sysconfig/iptables"
         mode: '0600'
 
-    - name: Apply iptables rules
+    - name: Apply iptables rulesasynchronously
       service:
         name: iptables
         state: restarted
+      async: 60
+      poll: 0
+      register: iptables_restarting
+
+    - name: check restart iptables status
+      async_status:
+        jid: "{{ iptables_restarting.ansible_job_id }}"
       register: iptables_result
+      until: iptables_result.finished
+      retries: 30
 
     # Only proceed with verification if iptables was successfully applied
     - block:
@@ -86,6 +108,12 @@
             path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/iptables"
           register: restore_check
 
+        - name: Read saved iptables service state
+          ansible.builtin.slurp:
+            src: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables_service_state"
+          register: iptables_saved_state
+          failed_when: false
+
         - name: Restore iptables from backup
           copy:
             src: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/iptables"
@@ -93,11 +121,45 @@
             remote_src: yes
           when: restore_check.stat.exists
 
+        - name: Get current iptables service state
+          ansible.builtin.command: systemctl is-active iptables.service
+          register: iptables_current_state
+          changed_when: false
+          failed_when: false
+
+        # If the service was initially inactive but is now active, stop it
+        - name: Stop iptables service if it was initially inactive
+          ansible.builtin.service:
+            name: iptables
+            state: stopped
+          when: 
+            - iptables_saved_state is defined 
+            - iptables_saved_state.content is defined
+            - (iptables_saved_state.content | b64decode | trim) == 'inactive' or (nftables_saved_state.content | b64decode | trim) == 'unknown'
+            - iptables_current_state.stdout == 'active'
+
         - name: Restart iptables after restore
           service:
             name: iptables
             state: restarted
-          when: restore_check.stat.exists
+          async: 60
+          poll: 0
+          register: iptables_restarting_restore
+          when: 
+            - iptables_saved_state is defined 
+            - iptables_saved_state.content is defined
+            - (iptables_saved_state.content | b64decode | trim) == 'active'
+
+        - name: check restart iptables status
+          async_status:
+            jid: "{{ iptables_restarting_restore.ansible_job_id }}"
+          register: iptables_restore_result
+          until: iptables_restore_result.finished
+          retries: 30
+          when: 
+            - iptables_saved_state is defined 
+            - iptables_saved_state.content is defined
+            - (iptables_saved_state.content | b64decode | trim) == 'active'
 
         - name: Remove backup directory after restore
           file:

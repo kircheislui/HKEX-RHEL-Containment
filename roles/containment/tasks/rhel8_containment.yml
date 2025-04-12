@@ -11,16 +11,29 @@
         path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}"
         state: directory
 
-    - name: Check if nftables backup exists
-      stat:
-        path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables.conf"
-      register: backup_check
-      failed_when: backup_check.stat.exists
+    - name: Get nftables service state directly
+      ansible.builtin.command: systemctl is-active nftables.service
+      register: nftables_state
+      changed_when: false
+      failed_when: false
+
+    - name: Save nftables service state to file
+      ansible.builtin.copy:
+        content: "{{ nftables_state.stdout }}"
+        dest: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables_service_state"
+        mode: '0644'
+        force: true
 
     - name: Check if nftables config file exists
       stat:
         path: "/etc/sysconfig/nftables.conf"
       register: nftables_config_check
+
+    - name: Check if nftables backup exists
+      stat:
+        path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables.conf"
+      register: backup_check
+      failed_when: backup_check.stat.exists
 
     - name: Backup existing nftables configuration from file
       copy:
@@ -29,26 +42,26 @@
         remote_src: yes
       when: nftables_config_check.stat.exists
 
-    - name: Backup current nftables ruleset if no config file exists
-      shell: nft list ruleset > "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables.conf"
-      when: not nftables_config_check.stat.exists
-
     - name: Generate nftables configuration
       template:
         src: "nftables/{{ profile | lower }}.j2"
         dest: "/etc/sysconfig/nftables.conf"
         mode: '0600'
 
-    - name: Apply nftables rules
+    - name: Apply nftables rules asynchronously
       service:
         name: nftables
-        state: restarted
-      register: nftables_result
+        state: reloaded
+      async: 60
+      poll: 0
+      register: nftables_restarting
 
-    - name: Verify nftables ruleset
-      shell: nft list ruleset
-      register: nftables_verify
-      changed_when: false
+    - name: check restart nftables status
+      async_status:
+        jid: "{{ nftables_restarting.ansible_job_id }}"
+      register: nftables_result
+      until: nftables_result.finished
+      retries: 30
 
     # Only proceed with verification if nftables was successfully applied
     - block:
@@ -88,25 +101,65 @@
       debug:
         msg: "Containment failed"
 
-    # Only perform restore if we have a backup to restore from
+    # Only perform restore if we have a backup to restore
     - block:
         - name: Check if backup exists for restore
           stat:
             path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables.conf"
           register: restore_check
 
-        - name: Restore nftables from backup
-          copy:
+        - name: Read saved nftables service state
+          ansible.builtin.slurp:
+            src: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables_service_state"
+          register: nftables_saved_state
+          failed_when: false
+
+        - name: Restore nftables configuration
+          ansible.builtin.copy:
             src: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables.conf"
             dest: "/etc/sysconfig/nftables.conf"
             remote_src: yes
           when: restore_check.stat.exists
 
-        - name: Restart nftables after restore
+        - name: Get current nftables service state
+          ansible.builtin.command: systemctl is-active nftables.service
+          register: nftables_current_state
+          changed_when: false
+          failed_when: false
+
+        # If the service was initially inactive but is now active, stop it
+        - name: Stop nftables service if it was initially inactive
+          ansible.builtin.service:
+            name: nftables
+            state: stopped
+          when: 
+            - nftables_saved_state is defined 
+            - nftables_saved_state.content is defined
+            - (nftables_saved_state.content | b64decode | trim) == 'inactive' or (nftables_saved_state.content | b64decode | trim) == 'unknown'
+            - nftables_current_state.stdout == 'active'
+
+        - name: Apply nftables rules asynchronously
           service:
             name: nftables
-            state: restarted
-          when: restore_check.stat.exists
+            state: reloaded
+          async: 60
+          poll: 0
+          register: nftables_restarting_restore
+          when: 
+            - nftables_saved_state is defined 
+            - nftables_saved_state.content is defined
+            - (nftables_saved_state.content | b64decode | trim) == 'active'
+
+        - name: check restart nftables status
+          async_status:
+            jid: "{{ nftables_restarting_restore.ansible_job_id }}"
+          register: nftables_restore_result
+          until: nftables_restore_result.finished
+          retries: 30
+          when: 
+            - nftables_saved_state is defined 
+            - nftables_saved_state.content is defined
+            - (nftables_saved_state.content | b64decode | trim) == 'active'
 
         - name: Remove backup directory after restore
           file:
@@ -116,7 +169,7 @@
 
         - name: Notification after restore
           debug:
-            msg: "Original configuration has been restored. Please verify manually that connectivity is working correctly."
+            msg: "Original configuration has been restored."
           when: restore_check.stat.exists
             
         - name: Notification when no backup to restore
