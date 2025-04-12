@@ -11,6 +11,18 @@
         path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}"
         state: directory
 
+    - name: Get nftables service state directly
+      ansible.builtin.command: systemctl is-active nftables.service
+      register: nftables_state
+      changed_when: false
+      failed_when: false
+
+    - name: Save nftables service state to file
+      ansible.builtin.copy:
+        content: "{{ nftables_state.stdout }}"
+        dest: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables_service_state"
+        mode: '0644'
+
     - name: Check if nftables config file exists
       stat:
         path: "/etc/sysconfig/nftables.conf"
@@ -28,18 +40,6 @@
         dest: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables.conf"
         remote_src: yes
       when: nftables_config_check.stat.exists
-
-    - name: Get nftables service state directly
-      ansible.builtin.command: systemctl is-active nftables.service
-      register: nftables_state
-      changed_when: false
-      failed_when: false
-
-    - name: Save nftables service state to file
-      ansible.builtin.copy:
-        content: "{{ nftables_state.stdout }}"
-        dest: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables_service_state"
-        mode: '0644'
 
     - name: Backup current nftables ruleset if no config file exists
       shell: nft list ruleset > "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables.conf"
