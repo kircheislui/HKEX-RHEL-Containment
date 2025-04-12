@@ -105,7 +105,7 @@
       debug:
         msg: "Containment failed"
 
-    # Only perform restore if we have a backup to restore from
+    # Only perform restore if we have a backup to restore
     - block:
         - name: Check if backup exists for restore
           stat:

@@ -6,6 +6,13 @@
     file_type: directory
   register: backup_files
 
+- name: Read saved nftables service state
+  ansible.builtin.slurp:
+    src: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables_service_state"
+  register: nftables_saved_state
+  failed_when: false
+  when: backup_files.matched > 0
+
 - name: Set latest backup path
   set_fact:
     latest_backup: "{{ (backup_files.files | sort(attribute='mtime', reverse=True) | first).path }}"
@@ -21,14 +28,19 @@
 - name: Apply restored nftables rules
   service:
     name: nftables
-    state: restarted
+    state: reloaded
+  async: 60
+  poll: 0
   register: nftables_result
   when: backup_files.matched > 0
 
-- name: Verify nftables application
-  shell: nft list ruleset
+- name: check restart nftables status
+  async_status:
+    jid: "{{ nftables_result.ansible_job_id }}"
+  register: nftables_restore_result
+  until: nftables_restore_result.finished
+  retries: 30
   when: backup_files.matched > 0
-  changed_when: false
 
 - name: Remove backup after successful resume
   file:
