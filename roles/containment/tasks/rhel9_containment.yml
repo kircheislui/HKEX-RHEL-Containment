@@ -130,11 +130,11 @@
             - nftables_saved_state.content is defined
             - (nftables_saved_state.content | b64decode | trim) == 'active'
 
-#        - name: Remove backup directory after restore
-#          file:
-#            path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}"
-#            state: absent
-#          when: restore_check.stat.exists
+        - name: Remove backup directory after restore
+          file:
+            path: "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}"
+            state: absent
+          when: restore_check.stat.exists
 
         - name: Notification after restore
           debug:
