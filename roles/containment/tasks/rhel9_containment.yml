@@ -54,7 +54,7 @@
     - name: Apply nftables rules
       service:
         name: nftables
-        state: restarted
+        state: reloaded
       register: nftables_result
 
     - name: Verify nftables ruleset
@@ -120,10 +120,10 @@
             remote_src: yes
           when: restore_check.stat.exists
 
-        - name: Restart nftables service only if it was active before
+        - name: Reload nftables service only if it was active before
           ansible.builtin.service:
             name: nftables
-            state: restarted
+            state: reloaded
           when: 
             - nftables_saved_state is defined 
             - nftables_saved_state.content is defined
