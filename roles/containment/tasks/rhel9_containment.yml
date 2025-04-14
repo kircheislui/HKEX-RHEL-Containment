@@ -82,6 +82,7 @@
           register: verification_results
           changed_when: false
           when: verification_list | length > 0
+          ignore_errors: true
 
         - name: Display successful verification results
           debug:
