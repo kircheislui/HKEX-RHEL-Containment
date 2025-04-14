@@ -33,7 +33,12 @@
       set_fact:
         default_inbound_whitelist: "{{ default_inbound_whitelist + [{'ip': item, 'port': 22, 'protocol': 'tcp'}] }}"
       loop: "{{ aap_ips }}"
-    
+
+    - name: Generate outbound whitelist for AAP servers
+      set_fact:
+        default_outbound_whitelist: "{{ default_outbound_whitelist + [{'ip': item, 'port': 22, 'protocol': 'tcp'}] }}"
+      loop: "{{ aap_ips }}"
+
     # Generate outbound whitelist for DNS servers (TCP)
     - name: Generate outbound whitelist for DNS servers (TCP)
       set_fact:
