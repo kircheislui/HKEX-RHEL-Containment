@@ -52,6 +52,17 @@
           - "Inbound whitelist: {{ default_inbound_whitelist }}"
           - "Outbound whitelist: {{ default_outbound_whitelist }}"
 
+    - name: Combine custom and default whitelists
+      set_fact:
+        combined_inbound_whitelist: "{{ inbound_whitelist | default([]) + default_inbound_whitelist }}"
+        combined_outbound_whitelist: "{{ outbound_whitelist | default([]) + default_outbound_whitelist }}"
+
+    - name: Display combined whitelists
+      debug:
+        msg:
+          - "Combined inbound whitelist: {{ combined_inbound_whitelist }}"
+          - "Combined outbound whitelist: {{ combined_outbound_whitelist }}"
+
     - name: Run containment role
       include_role:
         name: containment

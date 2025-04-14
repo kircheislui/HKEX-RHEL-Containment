@@ -10,7 +10,7 @@
 {% endraw %}
 -A INPUT -i lo -j ACCEPT{%- raw %}
 {% endraw %}
-{% for inbound in (default_inbound_whitelist + (inbound_whitelist | default([]))) %}
+{% for inbound in (combined_inbound_whitelist + (inbound_whitelist | default([]))) %}
 -A INPUT -p {{ inbound.protocol | default('tcp') }} --dport {{ inbound.port }} -s {{ inbound.ip | default(inbound.source) | default('0.0.0.0/0') }} -j ACCEPT{%- raw %}
 {% endraw %}
 {% endfor %}
