@@ -83,16 +83,17 @@
           changed_when: false
           when: verification_list | length > 0
 
+        - name: Display successful verification results
+          debug:
+            var: verification_results.stdout | from_json
+          when: verification_list | length > 0 and verification_results is defined
+
         # This task will fail if verification fails, triggering the rescue
         - name: Check verification results
           fail:
             msg: "Verification failed: One or more connectivity checks did not match expected results"
           when: verification_list | length > 0 and verification_results.rc != 0
 
-        - name: Display successful verification results
-          debug:
-            var: verification_results.stdout | from_json
-          when: verification_list | length > 0 and verification_results is defined
       when: not (nftables_result is defined and nftables_result.failed)
 
   # This rescue block will be triggered by ANY failure in the main block

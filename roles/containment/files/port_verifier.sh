@@ -1,91 +1,50 @@
 #!/bin/bash
 
-# port_verifier.sh - Simple port checking script
-# Usage: ./port_verifier.sh '[{"ip":"192.168.0.18","port":22,"protocol":"tcp","expect":"success"}]'
+# port_verifier.sh - Simple port checking script for RHEL 7/8/9
+# Usage: ./port_verifier.sh '[{"ip":"192.168.1.1","port":22,"protocol":"tcp","expect":"success"}]'
 
 # Set safe error handling
-set -o nounset
 set -o pipefail
 
-# Function to check if a TCP port is open
+# Function to check if a TCP port is open using timeout
 check_tcp_port() {
   local ip="$1"
   local port="$2"
-  local timeout=5
-  
-  # Validate input
-  if [[ -z "$ip" ]] || [[ -z "$port" ]]; then
-    echo "Invalid input: IP or port is empty" >&2
-    return 1
-  fi
+  local timeout_seconds=3
   
   echo "Checking TCP connection to $ip:$port..." >&2
   
-  # Use timeout command if available
-  if command -v timeout >/dev/null 2>&1; then
-    if timeout $timeout bash -c "echo > /dev/tcp/$ip/$port" >/dev/null 2>&1; then
-      return 0  # Success
-    else
-      return 1  # Failure
-    fi
+  # Use timeout with bash's /dev/tcp for TCP port checking
+  if timeout $timeout_seconds bash -c "</dev/tcp/$ip/$port" >/dev/null 2>&1; then
+    echo "TCP port $ip:$port is OPEN" >&2
+    return 0  # Success
   else
-    # Fallback if timeout is not available
-    if (echo > /dev/tcp/$ip/$port) >/dev/null 2>&1; then
-      return 0  # Success
-    else
-      return 1  # Failure
-    fi
+    echo "TCP port $ip:$port is CLOSED or filtered" >&2
+    return 1  # Failure
   fi
 }
 
-# Function to check UDP port
+# Function to check UDP port using timeout
 check_udp_port() {
   local ip="$1"
   local port="$2"
-  local timeout=5
-  
-  # Validate input
-  if [[ -z "$ip" ]] || [[ -z "$port" ]]; then
-    echo "Invalid input: IP or port is empty" >&2
-    return 1
-  fi
+  local timeout_seconds=3
   
   echo "Checking UDP connection to $ip:$port..." >&2
   
-  # Try nc if available
-  if command -v nc >/dev/null 2>&1; then
-    if command -v timeout >/dev/null 2>&1; then
-      if timeout $timeout nc -zu -w $timeout $ip $port >/dev/null 2>&1; then
-        return 0  # Success
-      else
-        return 1  # Failure
-      fi
-    else
-      if nc -zu -w $timeout $ip $port >/dev/null 2>&1; then
-        return 0  # Success
-      else
-        return 1  # Failure
-      fi
-    fi
+  # Use timeout with bash's /dev/udp for UDP port checking
+  if timeout $timeout_seconds bash -c "</dev/udp/$ip/$port" >/dev/null 2>&1; then
+    echo "UDP port $ip:$port appears to be OPEN" >&2
+    # Add warning about UDP check limitations
+    echo "Note: UDP check can only verify if packets can be sent, not if service is responding" >&2
+    return 0  # Success
   else
-    # Fallback to dev/udp
-    if command -v timeout >/dev/null 2>&1; then
-      if timeout $timeout bash -c "echo > /dev/udp/$ip/$port" >/dev/null 2>&1; then
-        return 0  # Success
-      else
-        return 1  # Failure
-      fi
-    else
-      if (echo > /dev/udp/$ip/$port) >/dev/null 2>&1; then
-        return 0  # Success
-      else
-        return 1  # Failure
-      fi
-    fi
+    echo "UDP port $ip:$port appears to be CLOSED or filtered" >&2
+    return 1  # Failure
   fi
 }
 
-# Main function with a simplified, targeted approach
+# Main function with simplified approach
 main() {
   # Check for required argument
   if [ $# -ne 1 ]; then
@@ -95,18 +54,18 @@ main() {
   
   # Get raw input
   raw_input="$1"
-  echo "Processing input... (length: ${#raw_input} bytes)" >&2
+  echo "Processing verification tests..." >&2
   
   # Initialize results array and success tracker
   declare -a results=()
   all_success=true
   
-  # Extract objects directly
-  # Remove square brackets
+  # Extract verification items using regex
+  # Remove square brackets to process the array contents
   clean_input="${raw_input#\[}"
   clean_input="${clean_input%\]}"
   
-  # Split by },{
+  # Split by closing/opening braces of objects
   IFS='},{' read -ra objects <<< "$clean_input"
   
   # Process each object
@@ -130,43 +89,27 @@ main() {
       continue
     fi
     
-    # Extract port
-    port=22  # Default port
+    # Extract port (default to 22 if not found)
+    port=22
     if [[ "$obj" =~ \"port\":([0-9]+) ]]; then
       port="${BASH_REMATCH[1]}"
     fi
     
-    # Extract protocol
-    protocol="tcp"  # Default protocol
+    # Extract protocol (default to tcp if not found)
+    protocol="tcp"
     if [[ "$obj" =~ \"protocol\":\"([^\"]+)\" ]]; then
       protocol="${BASH_REMATCH[1]}"
     fi
     
-    # Extract expected result - careful about the key name
-    expected="success"  # Default expectation
-    
-    # Try different variations of the expect key
+    # Extract expected result (default to success if not found)
+    expected="success"
     if [[ "$obj" =~ \"expect\":\"([^\"]+)\" ]]; then
       expected="${BASH_REMATCH[1]}"
-    elif [[ "$obj" =~ \"expected\":\"([^\"]+)\" ]]; then
-      expected="${BASH_REMATCH[1]}"
     fi
     
-    # Special handling for 10.0.0.2 which should have expect:failure
-    if [[ "$ip" == "10.0.0.2" ]]; then
-      # Double-check by looking for the specific pattern for 10.0.0.2
-      if [[ "$raw_input" =~ \"ip\":\"10\.0\.0\.2\".*\"expect\":\"([^\"]+)\" ]] || 
-         [[ "$raw_input" =~ \"expect\":\"([^\"]+)\".*\"ip\":\"10\.0\.0\.2\" ]]; then
-        expected="${BASH_REMATCH[1]}"
-      else
-        # Fallback to assume 10.0.0.2 should be blocked
-        expected="failure"
-      fi
-    fi
+    echo "Testing $protocol://$ip:$port (expect: $expected)" >&2
     
-    echo "Found test case: $protocol://$ip:$port (expect: $expected)" >&2
-    
-    # Perform the test
+    # Perform the actual port check
     if [[ "$protocol" == "tcp" ]]; then
       if check_tcp_port "$ip" "$port"; then
         actual="success"
@@ -180,72 +123,24 @@ main() {
         actual="failure"
       fi
     else
-      echo "Unsupported protocol: $protocol" >&2
-      actual="error"
+      echo "Warning: Unsupported protocol '$protocol', defaulting to tcp" >&2
+      if check_tcp_port "$ip" "$port"; then
+        actual="success"
+      else
+        actual="failure"
+      fi
     fi
     
     # Check if result matches expectation
-    if [[ "$actual" == "$expected" ]]; then
-      success=true
-    else
-      success=false
+    success=$([[ "$actual" == "$expected" ]] && echo true || echo false)
+    if [[ "$success" == "false" ]]; then
       all_success=false
     fi
     
-    # Create result object
-    result="{\"ip\":\"$ip\",\"port\":$port,\"protocol\":\"$protocol\",\"expected\":\"$expected\",\"actual\":\"$actual\",\"success\":$success}"
-    results+=("$result")
-    
-    echo "Result: $actual (Expected: $expected)" >&2
+    # Add to results
+    results+=("{\"ip\":\"$ip\",\"port\":$port,\"protocol\":\"$protocol\",\"expected\":\"$expected\",\"actual\":\"$actual\",\"success\":$success}")
+    echo "Result: $actual (Expected: $expected) - $([ "$success" == "true" ] && echo "PASS" || echo "FAIL")" >&2
   done
-  
-  # If no results, try a fallback approach
-  if [ ${#results[@]} -eq 0 ]; then
-    echo "Warning: No objects extracted, trying fallback approach" >&2
-    
-    # Fallback: Direct search for expected IPs
-    # Check 192.168.0.18
-    if [[ "$raw_input" == *"192.168.0.18"* ]]; then
-      ip="192.168.0.18"
-      port=22
-      protocol="tcp"
-      expected="success"
-      
-      if check_tcp_port "$ip" "$port"; then
-        actual="success"
-      else
-        actual="failure"
-      fi
-      
-      success=$([[ "$actual" == "$expected" ]] && echo true || echo false)
-      result="{\"ip\":\"$ip\",\"port\":$port,\"protocol\":\"$protocol\",\"expected\":\"$expected\",\"actual\":\"$actual\",\"success\":$success}"
-      results+=("$result")
-      
-      [[ "$success" == "false" ]] && all_success=false
-      echo "Fallback: Checked $ip:$port - Result: $actual (Expected: $expected)" >&2
-    fi
-    
-    # Check 10.0.0.2
-    if [[ "$raw_input" == *"10.0.0.2"* ]]; then
-      ip="10.0.0.2"
-      port=22
-      protocol="tcp"
-      expected="failure"
-      
-      if check_tcp_port "$ip" "$port"; then
-        actual="success"
-      else
-        actual="failure"
-      fi
-      
-      success=$([[ "$actual" == "$expected" ]] && echo true || echo false)
-      result="{\"ip\":\"$ip\",\"port\":$port,\"protocol\":\"$protocol\",\"expected\":\"$expected\",\"actual\":\"$actual\",\"success\":$success}"
-      results+=("$result")
-      
-      [[ "$success" == "false" ]] && all_success=false
-      echo "Fallback: Checked $ip:$port - Result: $actual (Expected: $expected)" >&2
-    fi
-  fi
   
   # Check if we processed any items
   if [ ${#results[@]} -eq 0 ]; then
@@ -261,7 +156,7 @@ main() {
     fi
     final_json+="${results[$i]}"
   done
-  final_json+=']}'
+  final_json+='],"all_success":'$all_success'}'
   
   echo "$final_json"
   
