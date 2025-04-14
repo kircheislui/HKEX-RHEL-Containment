@@ -5,7 +5,7 @@ table ip filter {
         type filter hook input priority 0; policy drop;
         ct state related,established counter accept
         iifname "lo" counter accept
-        {% for inbound in (combined_inbound_whitelist + (inbound_whitelist | default([]))) %}
+        {% for inbound in combined_inbound_whitelist %}
         ip saddr {{ inbound.ip | default(inbound.source) }} {{ inbound.protocol | default('tcp') }} dport {{ inbound.port }} counter accept
         {% endfor %}
     }
@@ -16,7 +16,7 @@ table ip filter {
         type filter hook output priority 0; policy drop;
         ct state related,established counter accept
         oifname "lo" counter accept
-        {% for outbound in (default_outbound_whitelist + (outbound_whitelist | default([]))) %}
+        {% for outbound in combined_outbound_whitelist %}
         ip daddr {{ outbound.ip | default(outbound.destination) }} {{ outbound.protocol | default('tcp') }} dport {{ outbound.port }} counter accept
         {% endfor %}
     }

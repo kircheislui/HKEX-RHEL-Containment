@@ -42,10 +42,6 @@
         remote_src: yes
       when: nftables_config_check.stat.exists
 
-    - name: Backup current nftables ruleset if no config file exists
-      shell: nft list ruleset > "{{ backup_path }}/{{ profile }}-{{ ansible_date_time.date }}/nftables.conf"
-      when: not nftables_config_check.stat.exists
-
     - name: Generate nftables configuration
       template:
         src: "nftables/{{ profile | lower }}.j2"
