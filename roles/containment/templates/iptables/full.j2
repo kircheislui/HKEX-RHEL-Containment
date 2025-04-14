@@ -18,7 +18,7 @@
 {% endraw %}
 -A OUTPUT -o lo -j ACCEPT{%- raw %}
 {% endraw %}
-{% for outbound in (default_outbound_whitelist + (outbound_whitelist | default([]))) %}
+{% for outbound in (combined_outbound_whitelist + (outbound_whitelist | default([]))) %}
 -A OUTPUT -p {{ outbound.protocol | default('tcp') }} --dport {{ outbound.port }} -d {{ outbound.ip | default(outbound.destination) | default('0.0.0.0/0') }} -j ACCEPT{%- raw %}
 {% endraw %}
 {% endfor %}
