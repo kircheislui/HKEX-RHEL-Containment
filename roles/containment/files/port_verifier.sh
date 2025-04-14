@@ -44,7 +44,7 @@ check_udp_port() {
   fi
 }
 
-# Main function with simplified approach
+# Main function with improved JSON parsing
 main() {
   # Check for required argument
   if [ $# -ne 1 ]; then
@@ -56,54 +56,96 @@ main() {
   raw_input="$1"
   echo "Processing verification tests..." >&2
   
+  # Remove any escaped quotes and normalize JSON format
+  # This is critical for handling JSON passed through Ansible
+  clean_json=$(echo "$raw_input" | sed 's/\\"/"/g')
+  
   # Initialize results array and success tracker
   declare -a results=()
   all_success=true
   
   # Extract verification items using regex
   # Remove square brackets to process the array contents
-  clean_input="${raw_input#\[}"
+  clean_input="${clean_json#\[}"
   clean_input="${clean_input%\]}"
   
+  # Debug output for troubleshooting
+  echo "Parsing input: $clean_input" >&2
+  
   # Split by closing/opening braces of objects
-  IFS='},{' read -ra objects <<< "$clean_input"
+  # Use a more robust splitting approach for JSON
+  json_objects=()
+  brace_count=0
+  current_object=""
+  
+  for (( i=0; i<${#clean_input}; i++ )); do
+    char="${clean_input:$i:1}"
+    current_object+="$char"
+    
+    if [[ "$char" == "{" ]]; then
+      ((brace_count++))
+    elif [[ "$char" == "}" ]]; then
+      ((brace_count--))
+      if [[ $brace_count -eq 0 && "${current_object: -1}" == "}" ]]; then
+        json_objects+=("$current_object")
+        current_object=""
+        # Skip the comma if present
+        if [[ "${clean_input:$i+1:1}" == "," ]]; then
+          ((i++))
+        fi
+      fi
+    fi
+  done
+  
+  # Check if we have any objects
+  if [ ${#json_objects[@]} -eq 0 ]; then
+    # Try an alternative approach - simple splitting by },{
+    IFS='},{' read -ra objects <<< "$clean_input"
+    
+    for obj in "${objects[@]}"; do
+      # Ensure object has proper braces
+      if [[ ! "$obj" =~ ^\{ ]]; then
+        obj="{"$obj
+      fi
+      if [[ ! "$obj" =~ \}$ ]]; then
+        obj=$obj"}"
+      fi
+      
+      json_objects+=("$obj")
+    done
+  fi
+  
+  echo "Found ${#json_objects[@]} verification items to process" >&2
   
   # Process each object
-  for obj in "${objects[@]}"; do
-    # Ensure object has proper braces
-    if [[ ! "$obj" =~ ^\{ ]]; then
-      obj="{"$obj
-    fi
-    if [[ ! "$obj" =~ \}$ ]]; then
-      obj=$obj"}"
-    fi
-    
+  for obj in "${json_objects[@]}"; do
     # Extract IP address
     ip=""
-    if [[ "$obj" =~ \"ip\":\"([^\"]+)\" ]]; then
+    if [[ "$obj" =~ \"ip\"[[:space:]]*:[[:space:]]*\"([^\"]+)\" ]]; then
       ip="${BASH_REMATCH[1]}"
     fi
     
     # Skip if no IP found
     if [[ -z "$ip" ]]; then
+      echo "Warning: Skipping object with no IP address: $obj" >&2
       continue
     fi
     
     # Extract port (default to 22 if not found)
     port=22
-    if [[ "$obj" =~ \"port\":([0-9]+) ]]; then
+    if [[ "$obj" =~ \"port\"[[:space:]]*:[[:space:]]*([0-9]+) ]]; then
       port="${BASH_REMATCH[1]}"
     fi
     
     # Extract protocol (default to tcp if not found)
     protocol="tcp"
-    if [[ "$obj" =~ \"protocol\":\"([^\"]+)\" ]]; then
+    if [[ "$obj" =~ \"protocol\"[[:space:]]*:[[:space:]]*\"([^\"]+)\" ]]; then
       protocol="${BASH_REMATCH[1]}"
     fi
     
     # Extract expected result (default to success if not found)
     expected="success"
-    if [[ "$obj" =~ \"expect\":\"([^\"]+)\" ]]; then
+    if [[ "$obj" =~ \"expect\"[[:space:]]*:[[:space:]]*\"([^\"]+)\" ]]; then
       expected="${BASH_REMATCH[1]}"
     fi
     
