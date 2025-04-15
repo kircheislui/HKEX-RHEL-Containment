@@ -10,6 +10,8 @@
     rhel8_job_template_id: 10
     rhel7_job_template_id: 11
 
+    job_launch_delay: 2
+
     # Multiple AAP server IPs
     aap_ips:
       - 192.168.1.38
@@ -122,6 +124,10 @@
       register: rhel9_job_response
       when: rhel9_hosts != ""
 
+    - name: Pause before launching RHEL 8 job
+      pause:
+        seconds: "{{ job_launch_delay }}"
+
     - name: Launch RHEL 8 containment job
       uri:
         url: "{{ tower_host }}/api/v2/job_templates/{{ rhel8_job_template_id }}/launch/"
@@ -144,6 +150,10 @@
         validate_certs: no  # Set to 'yes' in production
       register: rhel8_job_response
       when: rhel8_hosts != ""
+
+    - name: Pause before launching RHEL 7 job
+      pause:
+        seconds: "{{ job_launch_delay }}"
 
     - name: Launch RHEL 7 containment job
       uri:
