@@ -25,18 +25,35 @@
       set_fact:
         limit_hosts: "{{ limit.split(',') if limit is string else limit }}"
       
-    - name: Retrieve all hosts from AAP
+    - name: Initialize all_hosts list
+      set_fact:
+        all_hosts: []
+        next_url: "{{ tower_host }}/api/v2/hosts/"
+      
+    - name: Retrieve all hosts from AAP with pagination
       uri:
-        url: "{{ tower_host }}/api/v2/hosts/"
+        url: "{{ next_url }}"
         method: GET
         headers:
           Authorization: "Bearer {{ tower_token }}"
         validate_certs: false
       register: hosts_response
+      loop: "{{ range(0, 1000) | list }}"  # Arbitrary high number to handle large inventories
+      loop_control:
+        loop_var: page_num
+        extended: yes
+      until: hosts_response.json.next is none
+      when: next_url != ""
       
     - name: Extract host data
       set_fact:
-        all_hosts: "{{ hosts_response.json.results }}"
+        all_hosts: "{{ all_hosts + hosts_response.json.results }}"
+        next_url: "{{ hosts_response.json.next | default('') }}"
+      when: hosts_response is defined and hosts_response.json is defined
+      
+    - name: Display host count
+      debug:
+        msg: "Retrieved {{ all_hosts | length }} hosts from the API"
       
     - name: Map hosts to their inventories
       set_fact:
