@@ -24,37 +24,83 @@
     - name: Get limit hosts from extra vars
       set_fact:
         limit_hosts: "{{ limit.split(',') if limit is string else limit }}"
-      
-    - name: Initialize all_hosts list
+    
+    # More efficient method when the limit hosts list is of reasonable size
+    - name: Check if we can use direct filtering
       set_fact:
-        all_hosts: []
-        next_url: "{{ tower_host }}/api/v2/hosts/"
-      
-    - name: Retrieve all hosts from AAP with pagination
+        use_direct_filtering: "{{ limit_hosts | length <= 50 }}"
+    
+    - name: Use direct API filtering when limit hosts count is reasonable
       uri:
-        url: "{{ next_url }}"
+        url: "{{ tower_host }}/api/v2/hosts/?name__in={{ limit_hosts | join(',') }}&page_size=200"
         method: GET
         headers:
           Authorization: "Bearer {{ tower_token }}"
         validate_certs: false
-      register: hosts_response
-      loop: "{{ range(0, 1000) | list }}"  # Arbitrary high number to handle large inventories
-      loop_control:
-        loop_var: page_num
-        extended: yes
-      until: hosts_response.json.next is none
-      when: next_url != ""
-      
-    - name: Extract host data
+      register: filtered_hosts_response
+      when: use_direct_filtering
+    
+    # If direct filtering can't be used, use more efficient pagination approach
+    - name: Initialize for pagination approach
       set_fact:
-        all_hosts: "{{ all_hosts + hosts_response.json.results }}"
-        next_url: "{{ hosts_response.json.next | default('') }}"
-      when: hosts_response is defined and hosts_response.json is defined
-      
+        all_hosts: []
+        page_size: 200
+      when: not use_direct_filtering
+    
+    - name: Get first page and count
+      uri:
+        url: "{{ tower_host }}/api/v2/hosts/?page_size={{ page_size }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ tower_token }}"
+        validate_certs: false
+      register: first_page
+      when: not use_direct_filtering
+    
+    - name: Calculate pages needed
+      set_fact:
+        total_pages: "{{ ((first_page.json.count | int) / page_size) | int + (1 if ((first_page.json.count | int) % page_size) > 0 else 0) }}"
+        all_hosts: "{{ first_page.json.results }}"
+      when: not use_direct_filtering and first_page is defined
+    
+    - name: Retrieve remaining pages in parallel
+      uri:
+        url: "{{ tower_host }}/api/v2/hosts/?page={{ item }}&page_size={{ page_size }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ tower_token }}"
+        validate_certs: false
+      register: page_responses
+      with_sequence: start=2 end="{{ total_pages }}"
+      when: not use_direct_filtering and total_pages | int > 1
+      async: 60
+      poll: 0
+    
+    - name: Wait for all page retrieval tasks to complete
+      async_status:
+        jid: "{{ item.ansible_job_id }}"
+      register: page_results
+      until: page_results.finished
+      retries: 30
+      delay: 1
+      loop: "{{ page_responses.results | default([]) }}"
+      when: not use_direct_filtering and total_pages | int > 1 and item is defined and item.ansible_job_id is defined
+    
+    - name: Combine all pages
+      set_fact:
+        all_hosts: "{{ all_hosts + (item.json.results | default([])) }}"
+      loop: "{{ page_results.results | default([]) }}"
+      when: not use_direct_filtering and total_pages | int > 1 and item.json is defined
+    
+    # Consolidate results from either approach
+    - name: Set final hosts list
+      set_fact:
+        all_hosts: "{{ filtered_hosts_response.json.results if use_direct_filtering else all_hosts }}"
+    
     - name: Display host count
       debug:
-        msg: "Retrieved {{ all_hosts | length }} hosts from the API"
-      
+        msg: "Retrieved {{ all_hosts | length }} hosts from the API using {{ 'direct filtering' if use_direct_filtering else 'efficient pagination' }}"
+    
     - name: Map hosts to their inventories
       set_fact:
         host_inventory_map: >-
@@ -63,20 +109,28 @@
              'name': item.summary_fields.inventory.name
           }}) }}
       loop: "{{ all_hosts }}"
-      
+    
+    # If using full pagination approach, filter here
     - name: Find matched hosts in limit
       set_fact:
         matched_hosts: "{{ all_hosts | selectattr('name', 'in', limit_hosts) | list }}"
-      
+      when: not use_direct_filtering
+    
+    # If using direct filtering, all hosts are already matched
+    - name: Use all hosts as matched when using direct filtering
+      set_fact:
+        matched_hosts: "{{ all_hosts }}"
+      when: use_direct_filtering
+    
     - name: Debug matched hosts
       debug:
         var: matched_hosts
-      
+    
     - name: Fail if no hosts found
       fail:
         msg: "No hosts found matching limit: {{ limit_hosts | join(', ') }}"
       when: matched_hosts | length == 0
-      
+    
     # Simpler approach using loop to create hosts_by_inventory
     - name: Initialize hosts_by_inventory
       set_fact:
@@ -117,7 +171,6 @@
           - "RHEL 8 hosts: {{ rhel8_hosts }}"
           - "RHEL 7 hosts: {{ rhel7_hosts }}"
 
-
     - name: Launch RHEL 9 containment job
       uri:
         url: "{{ tower_host }}/api/v2/job_templates/{{ rhel9_job_template_id }}/launch/"
@@ -144,6 +197,7 @@
     - name: Pause before launching RHEL 8 job
       pause:
         seconds: "{{ job_launch_delay }}"
+      when: rhel9_hosts != "" and rhel8_hosts != ""
 
     - name: Launch RHEL 8 containment job
       uri:
@@ -171,6 +225,7 @@
     - name: Pause before launching RHEL 7 job
       pause:
         seconds: "{{ job_launch_delay }}"
+      when: (rhel9_hosts != "" or rhel8_hosts != "") and rhel7_hosts != ""
 
     - name: Launch RHEL 7 containment job
       uri:
